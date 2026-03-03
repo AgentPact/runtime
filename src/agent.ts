@@ -6,47 +6,75 @@
  *
  * @example
  * ```ts
- * import { ClawPactAgent, ClawPactClient, BASE_SEPOLIA } from '@clawpact/runtime';
- * import { createPublicClient, createWalletClient, http } from 'viem';
- * import { privateKeyToAccount } from 'viem/accounts';
- * import { baseSepolia } from 'viem/chains';
+ * import { ClawPactAgent } from '@clawpact/runtime';
  *
- * const account = privateKeyToAccount('0x...');
- * const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
- * const walletClient = createWalletClient({ account, chain: baseSepolia, transport: http() });
- * const client = new ClawPactClient(publicClient, BASE_SEPOLIA, walletClient);
+ * // Simplest — only privateKey required, uses default platform
+ * const agent = await ClawPactAgent.create({
+ *   privateKey: process.env.AGENT_PK!,
+ * });
  *
- * const agent = new ClawPactAgent({
- *   client,
+ * // Custom platform URL (e.g., local dev)
+ * const agent = await ClawPactAgent.create({
+ *   privateKey: process.env.AGENT_PK!,
  *   platformUrl: 'http://localhost:4000',
- *   wsUrl: 'ws://localhost:4000/ws',
- *   jwtToken: 'your-jwt',
+ * });
+ *
+ * // Custom RPC (e.g., own Alchemy key)
+ * const agent = await ClawPactAgent.create({
+ *   privateKey: process.env.AGENT_PK!,
+ *   rpcUrl: 'https://base-sepolia.g.alchemy.com/v2/MY_KEY',
  * });
  *
  * agent.on('TASK_CREATED', async (data) => {
- *   console.log('New task available:', data);
- *   // Auto-bid logic here
+ *   console.log('New task:', data);
  * });
  *
  * await agent.start();
  * ```
  */
 
-import { ClawPactWebSocket, type EventHandler, type WebSocketOptions } from "./transport/websocket.js";
-import type { ClawPactClient } from "./client.js";
-import { TaskChatClient, type MessageType } from "./chat/taskChat.js";
+import {
+    createPublicClient,
+    createWalletClient,
+    http,
+    type PublicClient,
+    type WalletClient,
+    type Transport,
+    type Chain,
+    type Account,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { baseSepolia, base } from "viem/chains";
 
-/** Agent configuration */
-export interface AgentConfig {
-    /** ClawPactClient instance (with wallet for write operations) */
-    client: ClawPactClient;
-    /** Platform REST API URL (e.g., 'http://localhost:4000') */
-    platformUrl: string;
-    /** Platform WebSocket URL (e.g., 'ws://localhost:4000/ws') */
-    wsUrl: string;
-    /** JWT authentication token */
-    jwtToken: string;
+import { ClawPactWebSocket, type WebSocketOptions } from "./transport/websocket.js";
+import { ClawPactClient } from "./client.js";
+import { TaskChatClient, type MessageType } from "./chat/taskChat.js";
+import { fetchPlatformConfig } from "./config.js";
+import { DEFAULT_PLATFORM_URL } from "./constants.js";
+import type { PlatformConfig } from "./types.js";
+
+// ──── Configuration Types ────────────────────────────────────────
+
+/** Minimal config for ClawPactAgent.create() */
+export interface AgentCreateOptions {
+    /** Agent's wallet private key (hex, with or without 0x prefix) */
+    privateKey: string;
+    /** Platform API URL (default: DEFAULT_PLATFORM_URL) */
+    platformUrl?: string;
+    /** Override RPC URL (default: from /api/config) */
+    rpcUrl?: string;
+    /** JWT token (if already authenticated) */
+    jwtToken?: string;
     /** WebSocket connection options */
+    wsOptions?: WebSocketOptions;
+}
+
+/** Full agent config (after auto-discovery) */
+export interface AgentConfig {
+    client: ClawPactClient;
+    platformUrl: string;
+    wsUrl: string;
+    jwtToken: string;
     wsOptions?: WebSocketOptions;
 }
 
@@ -57,15 +85,12 @@ export interface TaskEvent {
     taskId?: string;
 }
 
-/**
- * ClawPactAgent provides an event-driven framework for Agent bots.
- *
- * Connects to the platform via WebSocket for real-time events,
- * and provides convenience methods for common agent operations.
- */
+// ──── Agent Class ────────────────────────────────────────────────
+
 export class ClawPactAgent {
     readonly client: ClawPactClient;
     readonly chat: TaskChatClient;
+    readonly platformConfig: PlatformConfig;
     private ws: ClawPactWebSocket;
     private platformUrl: string;
     private jwtToken: string;
@@ -73,12 +98,85 @@ export class ClawPactAgent {
     private subscribedTasks = new Set<string>();
     private _running = false;
 
-    constructor(config: AgentConfig) {
+    private constructor(
+        config: AgentConfig,
+        platformConfig: PlatformConfig
+    ) {
         this.client = config.client;
         this.platformUrl = config.platformUrl.replace(/\/$/, "");
         this.jwtToken = config.jwtToken;
         this.ws = new ClawPactWebSocket(config.wsUrl, config.wsOptions);
         this.chat = new TaskChatClient(this.platformUrl, this.jwtToken);
+        this.platformConfig = platformConfig;
+    }
+
+    /**
+     * Create an agent with auto-discovery.
+     * Only `privateKey` is required — everything else is fetched from the platform.
+     *
+     * @example
+     * ```ts
+     * const agent = await ClawPactAgent.create({
+     *   privateKey: process.env.AGENT_PK!,
+     * });
+     * ```
+     */
+    static async create(options: AgentCreateOptions): Promise<ClawPactAgent> {
+        const baseUrl = options.platformUrl ?? DEFAULT_PLATFORM_URL;
+
+        // Step 1: Fetch remote configuration
+        const config = await fetchPlatformConfig(baseUrl);
+
+        // Step 2: Resolve RPC URL (user override > remote config)
+        const rpcUrl = options.rpcUrl ?? config.rpcUrl;
+
+        // Step 3: Create viem clients
+        const pk = options.privateKey.startsWith("0x")
+            ? options.privateKey as `0x${string}`
+            : `0x${options.privateKey}` as `0x${string}`;
+
+        const account = privateKeyToAccount(pk);
+        const viemChain = config.chainId === 8453 ? base : baseSepolia;
+
+        const publicClient = createPublicClient({
+            chain: viemChain,
+            transport: http(rpcUrl),
+        });
+
+        const walletClient = createWalletClient({
+            account,
+            chain: viemChain,
+            transport: http(rpcUrl),
+        });
+
+        // Step 4: Create ClawPactClient
+        const chainConfig = {
+            chainId: config.chainId,
+            rpcUrl,
+            escrowAddress: config.escrowAddress as `0x${string}`,
+            usdcAddress: config.usdcAddress as `0x${string}`,
+            explorerUrl: config.explorerUrl,
+        };
+
+        const client = new ClawPactClient(
+            publicClient as PublicClient,
+            chainConfig,
+            walletClient as WalletClient<Transport, Chain, Account>
+        );
+
+        // Step 5: Authenticate (get JWT if not provided)
+        const jwtToken = options.jwtToken ?? "";
+
+        return new ClawPactAgent(
+            {
+                client,
+                platformUrl: baseUrl,
+                wsUrl: config.wsUrl,
+                jwtToken,
+                wsOptions: options.wsOptions,
+            },
+            config
+        );
     }
 
     /** Whether the agent is currently running */
@@ -91,6 +189,13 @@ export class ClawPactAgent {
      */
     async start(): Promise<void> {
         if (this._running) return;
+
+        if (!this.jwtToken) {
+            throw new Error(
+                "JWT token required to start the agent. " +
+                "Pass jwtToken in create() options, or call authenticate() first."
+            );
+        }
 
         // Set up WebSocket event forwarding
         this.ws.on("*", (raw) => {
@@ -111,34 +216,22 @@ export class ClawPactAgent {
         }
     }
 
-    /**
-     * Stop the agent: disconnect WebSocket and clean up.
-     */
+    /** Stop the agent */
     stop(): void {
         this._running = false;
         this.ws.disconnect();
     }
 
-    /**
-     * Register an event handler for a specific platform event.
-     *
-     * Common events: TASK_CREATED, TASK_ASSIGNED, TASK_DELIVERED,
-     * TASK_ACCEPTED, REVISION_REQUESTED, CHAT_MESSAGE
-     */
+    /** Register an event handler */
     on(event: string, handler: (data: TaskEvent) => void | Promise<void>): () => void {
         if (!this.handlers.has(event)) {
             this.handlers.set(event, new Set());
         }
         this.handlers.get(event)!.add(handler);
-
-        return () => {
-            this.handlers.get(event)?.delete(handler);
-        };
+        return () => { this.handlers.get(event)?.delete(handler); };
     }
 
-    /**
-     * Watch a specific task for real-time updates.
-     */
+    /** Watch a specific task for real-time updates */
     watchTask(taskId: string): void {
         this.subscribedTasks.add(taskId);
         if (this._running) {
@@ -146,18 +239,13 @@ export class ClawPactAgent {
         }
     }
 
-    /**
-     * Stop watching a task.
-     */
+    /** Stop watching a task */
     unwatchTask(taskId: string): void {
         this.subscribedTasks.delete(taskId);
     }
 
     // ──── Convenience Methods ────────────────────────────────────────
 
-    /**
-     * Fetch available tasks from the marketplace.
-     */
     async getAvailableTasks(options: {
         limit?: number;
         offset?: number;
@@ -178,9 +266,6 @@ export class ClawPactAgent {
         return body.data || [];
     }
 
-    /**
-     * Submit a bid for a task.
-     */
     async bidOnTask(taskId: string, message?: string): Promise<unknown> {
         const res = await fetch(
             `${this.platformUrl}/api/matching/bid`,
@@ -195,9 +280,6 @@ export class ClawPactAgent {
         return ((await res.json()) as { data: unknown }).data;
     }
 
-    /**
-     * Send a chat message on a task.
-     */
     async sendMessage(
         taskId: string,
         content: string,
@@ -214,7 +296,6 @@ export class ClawPactAgent {
             for (const handler of handlers) {
                 try {
                     const result = handler(data);
-                    // Handle async handlers silently
                     if (result instanceof Promise) {
                         result.catch((err) => {
                             console.error(`[Agent] Async handler error for "${event}":`, err);

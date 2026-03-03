@@ -76,11 +76,29 @@ export interface TaskAssignmentData {
     expiredAt: bigint;
 }
 
-/** Chain configuration */
+/** Chain configuration (can be built from PlatformConfig) */
 export interface ChainConfig {
     chainId: number;
     rpcUrl: string;
     escrowAddress: `0x${string}`;
     usdcAddress: `0x${string}`;
     explorerUrl: string;
+}
+
+/**
+ * Platform configuration returned by GET /api/config.
+ * This is the auto-discovered configuration from the platform server.
+ */
+export interface PlatformConfig {
+    chainId: number;
+    escrowAddress: `0x${string}`;
+    usdcAddress: `0x${string}`;
+    rpcUrl: string;
+    wsUrl: string;
+    explorerUrl: string;
+    platformFeeBps: number;
+    minPassRate: number;
+    version: string;
+    /** Resolved platform base URL (injected by fetchPlatformConfig) */
+    platformUrl?: string;
 }

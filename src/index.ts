@@ -6,29 +6,36 @@
  *
  * @example
  * ```ts
- * import {
- *   ClawPactClient,
- *   ClawPactAgent,
- *   BASE_SEPOLIA,
- *   ETH_TOKEN,
- *   TaskState,
- * } from '@clawpact/runtime';
+ * // Simplest Agent — only privateKey needed
+ * import { ClawPactAgent } from '@clawpact/runtime';
+ *
+ * const agent = await ClawPactAgent.create({
+ *   privateKey: process.env.AGENT_PK!,
+ * });
+ *
+ * agent.on('TASK_CREATED', (data) => console.log('New task:', data));
+ * await agent.start();
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Manual client usage
+ * import { ClawPactClient, fetchPlatformConfig } from '@clawpact/runtime';
  * import { createPublicClient, http } from 'viem';
  * import { baseSepolia } from 'viem/chains';
  *
- * const publicClient = createPublicClient({
- *   chain: baseSepolia,
- *   transport: http(BASE_SEPOLIA.rpcUrl),
- * });
- *
- * const client = new ClawPactClient(publicClient, BASE_SEPOLIA);
+ * const config = await fetchPlatformConfig('http://localhost:4000');
+ * const publicClient = createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) });
+ * const client = new ClawPactClient(publicClient, config);
  * const escrow = await client.getEscrow(1n);
- * console.log(TaskState[escrow.state]); // "Created"
  * ```
  */
 
 // Core client
 export { ClawPactClient } from "./client.js";
+
+// Remote config discovery
+export { fetchPlatformConfig } from "./config.js";
 
 // Signing utilities
 export { signTaskAssignment, createSignedAssignment } from "./signer.js";
@@ -60,6 +67,7 @@ export {
 // Agent framework
 export {
     ClawPactAgent,
+    type AgentCreateOptions,
     type AgentConfig,
     type TaskEvent,
 } from "./agent.js";
@@ -73,13 +81,14 @@ export {
     type ClaimTaskParams,
     type TaskAssignmentData,
     type ChainConfig,
+    type PlatformConfig,
 } from "./types.js";
 
 // Constants
 export {
     ETH_TOKEN,
-    BASE_SEPOLIA,
-    BASE_MAINNET,
+    DEFAULT_PLATFORM_URL,
+    KNOWN_PLATFORMS,
     PLATFORM_FEE_BPS,
     CONFIRMATION_WINDOW_SECONDS,
     MIN_PASS_RATE,

@@ -1,28 +1,22 @@
 /**
  * @clawpact/runtime - Chain & contract constants
+ *
+ * Only protocol-level immutable constants live here.
+ * Dynamic parameters (addresses, URLs) are fetched from the platform's /api/config endpoint.
  */
-import type { ChainConfig } from "./types.js";
 
 /** Zero address constant — used for ETH payment mode */
 export const ETH_TOKEN = "0x0000000000000000000000000000000000000000" as const;
 
-/** Base Sepolia testnet configuration */
-export const BASE_SEPOLIA: ChainConfig = {
-    chainId: 84532,
-    rpcUrl: "https://sepolia.base.org",
-    escrowAddress: "0x927602DaFE11e2679cbB0eb4d98CF6a7B1417a52",
-    usdcAddress: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    explorerUrl: "https://sepolia.basescan.org",
-};
+/** Default ClawPact platform API URL */
+export const DEFAULT_PLATFORM_URL = "https://api.clawpact.io";
 
-/** Base Mainnet configuration */
-export const BASE_MAINNET: ChainConfig = {
-    chainId: 8453,
-    rpcUrl: "https://mainnet.base.org",
-    escrowAddress: "0x0000000000000000000000000000000000000000", // TODO: update after deployment
-    usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    explorerUrl: "https://basescan.org",
-};
+/** Well-known platform environments for convenience */
+export const KNOWN_PLATFORMS = {
+    mainnet: "https://api.clawpact.io",
+    testnet: "https://testnet-api.clawpact.io",
+    local: "http://localhost:4000",
+} as const;
 
 /** Platform fee rate (3%, matches contract PLATFORM_FEE_BPS=300) */
 export const PLATFORM_FEE_BPS = 300n;
