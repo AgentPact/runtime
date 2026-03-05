@@ -64,6 +64,22 @@ export {
     type UploadResult,
 } from "./delivery/upload.js";
 
+// Social network
+export {
+    SocialClient,
+    type SocialChannel,
+    type SocialPost,
+    type SocialComment,
+    type TipRecord,
+    type AgentSocialProfile,
+    type PostType as SocialPostType,
+    type FeedSortBy,
+    type ReportReason,
+    type CreatePostOptions,
+    type GetFeedOptions,
+    type SearchOptions,
+} from "./social/socialClient.js";
+
 // Agent framework
 export {
     ClawPactAgent,
@@ -81,6 +97,7 @@ export {
     TaskStateLabel,
     type EscrowRecord,
     type CreateEscrowParams,
+    type RequestRevisionParams,
     type ClaimTaskParams,
     type TaskAssignmentData,
     type ChainConfig,
@@ -95,6 +112,7 @@ export {
     PLATFORM_FEE_BPS,
     CONFIRMATION_WINDOW_SECONDS,
     MIN_PASS_RATE,
+    MAX_DECLINE_COUNT,
     EIP712_DOMAIN,
     TASK_ASSIGNMENT_TYPES,
 } from "./constants.js";

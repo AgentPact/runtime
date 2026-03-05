@@ -66,6 +66,7 @@ import { baseSepolia, base } from "viem/chains";
 import { ClawPactWebSocket, type WebSocketOptions } from "./transport/websocket.js";
 import { ClawPactClient } from "./client.js";
 import { TaskChatClient, type MessageType } from "./chat/taskChat.js";
+import { SocialClient } from "./social/socialClient.js";
 import { fetchPlatformConfig } from "./config.js";
 import { DEFAULT_PLATFORM_URL } from "./constants.js";
 import type { PlatformConfig, ClaimTaskParams } from "./types.js";
@@ -143,6 +144,8 @@ export interface TaskDetailsData {
  * TASK_ACCEPTED         - Requester accepted delivery, funds released
  * TASK_DELIVERED        - Delivery submitted (hash on-chain)
  * TASK_SETTLED          - Auto-settlement triggered at revision limit
+ * TASK_ABANDONED        - Agent voluntarily abandoned the task
+ * TASK_SUSPENDED        - Task suspended after 3 declines
  * CHAT_MESSAGE          - New chat message received
  */
 export type AgentEventType =
@@ -155,6 +158,8 @@ export type AgentEventType =
     | "TASK_ACCEPTED"
     | "TASK_DELIVERED"
     | "TASK_SETTLED"
+    | "TASK_ABANDONED"
+    | "TASK_SUSPENDED"
     | "CHAT_MESSAGE"
     | "connected"
     | "disconnected"
@@ -166,6 +171,7 @@ export type AgentEventType =
 export class ClawPactAgent {
     readonly client: ClawPactClient;
     readonly chat: TaskChatClient;
+    readonly social: SocialClient;
     readonly platformConfig: PlatformConfig;
     private ws: ClawPactWebSocket;
     private platformUrl: string;
@@ -184,6 +190,7 @@ export class ClawPactAgent {
         this.jwtToken = config.jwtToken;
         this.ws = new ClawPactWebSocket(config.wsUrl, config.wsOptions);
         this.chat = new TaskChatClient(this.platformUrl, this.jwtToken);
+        this.social = new SocialClient(this.platformUrl, this.jwtToken);
         this.platformConfig = platformConfig;
         this.autoClaimOnSignature = config.autoClaimOnSignature;
     }
@@ -351,6 +358,16 @@ export class ClawPactAgent {
         const formattedHash = deliveryHash.startsWith('0x') ? deliveryHash as `0x${string}` : `0x${deliveryHash}` as `0x${string}`;
         const txHash = await this.client.submitDelivery(escrowId, formattedHash);
         console.log(`[Agent] Delivery submitted on-chain: ${txHash} for escrow: ${escrowId}`);
+        return txHash;
+    }
+
+    /**
+     * Voluntarily abandon a task during Working or InRevision.
+     * Lighter credit penalty than delivery timeout. Task returns to Created for re-matching.
+     */
+    async abandonTask(escrowId: bigint): Promise<string> {
+        const txHash = await this.client.abandonTask(escrowId);
+        console.log(`[Agent] Task abandoned on-chain: ${txHash}`);
         return txHash;
     }
 

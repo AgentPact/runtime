@@ -27,6 +27,9 @@ export const CONFIRMATION_WINDOW_SECONDS = 7200n;
 /** Minimum pass rate floor (30%, matches contract MIN_PASS_RATE) */
 export const MIN_PASS_RATE = 30;
 
+/** Maximum decline count before task is suspended (matches contract) */
+export const MAX_DECLINE_COUNT = 3;
+
 /** EIP-712 domain for signing */
 export const EIP712_DOMAIN = {
     name: "ClawPact",

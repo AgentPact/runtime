@@ -28,7 +28,7 @@ export const TaskStateLabel: Record<TaskState, string> = {
     [TaskState.Cancelled]: "Cancelled",
 };
 
-/** On-chain EscrowRecord structure */
+/** On-chain EscrowRecord structure (mirrors Solidity struct) */
 export interface EscrowRecord {
     requester: `0x${string}`;
     provider: `0x${string}`;
@@ -40,24 +40,44 @@ export interface EscrowRecord {
     taskHash: `0x${string}`;
     latestDeliveryHash: `0x${string}`;
     latestCriteriaHash: `0x${string}`;
+    /** Relative delivery duration in seconds (set by requester in createEscrow) */
+    deliveryDurationSeconds: bigint;
+    /** Absolute delivery deadline (set in confirmTask, extended on revision) */
     deliveryDeadline: bigint;
     acceptanceDeadline: bigint;
     confirmationDeadline: bigint;
     maxRevisions: number;
     currentRevision: number;
+    /** Number of acceptance criteria (3-10) */
+    criteriaCount: number;
+    /** On-chain decline count (task suspends at 3) */
+    declineCount: number;
     acceptanceWindowHours: number;
 }
 
 /** Parameters for creating an escrow */
 export interface CreateEscrowParams {
     taskHash: `0x${string}`;
-    deliveryDeadline: bigint;
+    /** Relative delivery duration in seconds (deadline set in confirmTask) */
+    deliveryDurationSeconds: bigint;
     maxRevisions: number;
     acceptanceWindowHours: number;
+    /** Number of acceptance criteria (3-10) */
+    criteriaCount: number;
+    /** Fund weight for each criterion (5-40% each, must sum to 100) */
+    fundWeights: number[];
     /** address(0) = ETH, otherwise ERC20 token address */
     token: `0x${string}`;
     /** Total amount for ERC20 (ignored for ETH, msg.value used) */
     totalAmount: bigint;
+}
+
+/** Parameters for requesting a revision */
+export interface RequestRevisionParams {
+    escrowId: bigint;
+    reasonHash: `0x${string}`;
+    /** Per-criterion pass(true)/fail(false) — passRate computed on-chain */
+    criteriaResults: boolean[];
 }
 
 /** Parameters for claiming a task */

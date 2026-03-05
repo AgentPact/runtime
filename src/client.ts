@@ -19,6 +19,7 @@ import { ETH_TOKEN } from "./constants.js";
 import type {
     EscrowRecord,
     CreateEscrowParams,
+    RequestRevisionParams,
     ClaimTaskParams,
     ChainConfig,
 } from "./types.js";
@@ -72,13 +73,23 @@ export class ClawPactClient {
         }) as Promise<bigint>;
     }
 
-    /** Get calculated pass rate for an escrow */
-    async getPassRate(escrowId: bigint): Promise<number> {
+    /** Get all fund weights for an escrow (on-chain stored) */
+    async getFundWeights(escrowId: bigint): Promise<number[]> {
         return this.publicClient.readContract({
             address: this.escrowAddress,
             abi: clawPactEscrowAbi,
-            functionName: "calculatedPassRates",
+            functionName: "getFundWeights",
             args: [escrowId],
+        }) as Promise<number[]>;
+    }
+
+    /** Get fund weight for a specific criterion */
+    async getFundWeight(escrowId: bigint, criteriaIndex: number): Promise<number> {
+        return this.publicClient.readContract({
+            address: this.escrowAddress,
+            abi: clawPactEscrowAbi,
+            functionName: "getFundWeight",
+            args: [escrowId, criteriaIndex],
         }) as Promise<number>;
     }
 
@@ -136,9 +147,11 @@ export class ClawPactClient {
             functionName: "createEscrow",
             args: [
                 params.taskHash,
-                params.deliveryDeadline,
+                params.deliveryDurationSeconds,
                 params.maxRevisions,
                 params.acceptanceWindowHours,
+                params.criteriaCount,
+                params.fundWeights,
                 params.token,
                 params.totalAmount,
             ],
@@ -162,7 +175,7 @@ export class ClawPactClient {
         });
     }
 
-    /** Confirm task after reviewing materials */
+    /** Confirm task after reviewing materials — sets deliveryDeadline on-chain */
     async confirmTask(escrowId: bigint): Promise<Hash> {
         const wallet = this.requireWallet();
         return wallet.writeContract({
@@ -173,7 +186,7 @@ export class ClawPactClient {
         });
     }
 
-    /** Decline task during confirmation window */
+    /** Decline task during confirmation window (tracked on-chain, 3x causes suspension) */
     async declineTask(escrowId: bigint): Promise<Hash> {
         const wallet = this.requireWallet();
         return wallet.writeContract({
@@ -198,6 +211,17 @@ export class ClawPactClient {
         });
     }
 
+    /** Voluntarily abandon task during execution (lighter penalty than timeout) */
+    async abandonTask(escrowId: bigint): Promise<Hash> {
+        const wallet = this.requireWallet();
+        return wallet.writeContract({
+            address: this.escrowAddress,
+            abi: clawPactEscrowAbi,
+            functionName: "abandonTask",
+            args: [escrowId],
+        });
+    }
+
     /** Accept delivery and release funds */
     async acceptDelivery(escrowId: bigint): Promise<Hash> {
         const wallet = this.requireWallet();
@@ -209,18 +233,14 @@ export class ClawPactClient {
         });
     }
 
-    /** Request revision with criteria results */
-    async requestRevision(
-        escrowId: bigint,
-        reasonHash: `0x${string}`,
-        criteriaResultsHash: `0x${string}`
-    ): Promise<Hash> {
+    /** Request revision with per-criterion pass/fail — passRate computed on-chain */
+    async requestRevision(params: RequestRevisionParams): Promise<Hash> {
         const wallet = this.requireWallet();
         return wallet.writeContract({
             address: this.escrowAddress,
             abi: clawPactEscrowAbi,
             functionName: "requestRevision",
-            args: [escrowId, reasonHash, criteriaResultsHash],
+            args: [params.escrowId, params.reasonHash, params.criteriaResults],
         });
     }
 
@@ -284,6 +304,23 @@ export class ClawPactClient {
         const rewardAmount = (totalAmount * 100n) / (100n + depositRate);
         const requesterDeposit = totalAmount - rewardAmount;
         return { rewardAmount, requesterDeposit };
+    }
+
+    /** Validate fund weights (3-10 criteria, 5-40% each, sum=100) */
+    static validateFundWeights(weights: number[]): void {
+        if (weights.length < 3 || weights.length > 10) {
+            throw new Error(`Expected 3-10 criteria, got ${weights.length}`);
+        }
+        let total = 0;
+        for (const w of weights) {
+            if (w < 5 || w > 40) {
+                throw new Error(`Each weight must be 5-40%, got ${w}%`);
+            }
+            total += w;
+        }
+        if (total !== 100) {
+            throw new Error(`Weights must sum to 100%, got ${total}%`);
+        }
     }
 
     /** Check if escrow is in a terminal state */
