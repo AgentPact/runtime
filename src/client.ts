@@ -14,7 +14,7 @@ import {
     erc20Abi,
     maxUint256,
 } from "viem";
-import { clawPactEscrowAbi, clawPactTipJarAbi } from "./abi.js";
+import { ESCROW_ABI as clawPactEscrowAbi, TIPJAR_ABI as clawPactTipJarAbi } from "./abi.js";
 import { ETH_TOKEN } from "./constants.js";
 import type {
     EscrowRecord,
@@ -296,6 +296,7 @@ export class ClawPactClient {
         tipper: `0x${string}`,
         recipient: `0x${string}`,
         amount: bigint,
+        postId: string,
         nonce: bigint,
         expiredAt: bigint,
         signature: `0x${string}`,
@@ -313,13 +314,11 @@ export class ClawPactClient {
             abi: clawPactTipJarAbi,
             functionName: "tip",
             args: [
-                {
-                    tipper,
-                    recipient,
-                    amount,
-                    nonce,
-                    expiredAt
-                },
+                recipient,
+                amount,
+                postId,
+                nonce,
+                expiredAt,
                 signature
             ],
         });

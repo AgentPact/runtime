@@ -375,6 +375,79 @@ export class ClawPactAgent {
     }
 
     /**
+     * Report execution progress to the platform.
+     * This is a platform API call (not on-chain) for visibility.
+     *
+     * @param taskId - Task ID
+     * @param percent - Progress percentage (0-100)
+     * @param description - Human-readable progress description
+     */
+    async reportProgress(
+        taskId: string,
+        percent: number,
+        description: string
+    ): Promise<void> {
+        const res = await fetch(
+            `${this.platformUrl}/api/tasks/${taskId}/progress`,
+            {
+                method: "POST",
+                headers: this.headers(),
+                body: JSON.stringify({ percent: Math.max(0, Math.min(100, percent)), description }),
+            }
+        );
+        if (!res.ok) throw new Error(`Failed to report progress: ${res.status}`);
+        console.log(`[Agent] Progress reported: ${percent}% — ${description}`);
+    }
+
+    /**
+     * Claim acceptance timeout — when requester doesn't review within the window.
+     * Agent gets full reward. Only callable by requester or provider.
+     */
+    async claimAcceptanceTimeout(escrowId: bigint): Promise<string> {
+        const txHash = await this.client.claimAcceptanceTimeout(escrowId);
+        console.log(`[Agent] Acceptance timeout claimed: ${txHash}`);
+        return txHash;
+    }
+
+    /**
+     * Claim delivery timeout — when provider doesn't deliver on time.
+     * Requester gets full refund. Only callable by requester or provider.
+     */
+    async claimDeliveryTimeout(escrowId: bigint): Promise<string> {
+        const txHash = await this.client.claimDeliveryTimeout(escrowId);
+        console.log(`[Agent] Delivery timeout claimed: ${txHash}`);
+        return txHash;
+    }
+
+    /**
+     * Claim confirmation timeout — when provider doesn't confirm/decline within 2h.
+     * Task returns to Created for re-matching. Only callable by requester or provider.
+     */
+    async claimConfirmationTimeout(escrowId: bigint): Promise<string> {
+        const txHash = await this.client.claimConfirmationTimeout(escrowId);
+        console.log(`[Agent] Confirmation timeout claimed: ${txHash}`);
+        return txHash;
+    }
+
+    /**
+     * Fetch revision details including structured criteriaResults.
+     * Use after receiving a REVISION_REQUESTED event to understand what failed.
+     *
+     * @param taskId - Task ID
+     * @param revision - Revision number (1-based)
+     */
+    async getRevisionDetails(taskId: string, revision?: number): Promise<unknown> {
+        const params = revision ? `?revision=${revision}` : "";
+        const res = await fetch(
+            `${this.platformUrl}/api/tasks/${taskId}/revisions${params}`,
+            { headers: this.headers() }
+        );
+        if (!res.ok) throw new Error(`Failed to fetch revision details: ${res.status}`);
+        const body = (await res.json()) as { data: unknown };
+        return body.data;
+    }
+
+    /**
      * Fetch full task details including confidential materials.
      * Only available after claimTask() has been called on-chain.
      */

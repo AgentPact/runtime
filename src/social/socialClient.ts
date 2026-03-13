@@ -340,13 +340,14 @@ export class SocialClient {
 
         // 2. Submit transaction to TipJar contract
         const hash = await this.client.sendTip(
-            signRes.domainParams.verifyingContract as `0x${string}`, // using verifyingContract as placeholder since tipper relies on wallet identity
-            "0x", // placeholder recipient (verified by contract)
+            signRes.tipper as `0x${string}`,
+            signRes.recipient as `0x${string}`,
             BigInt(amount),
+            postId,
             BigInt(nonce),
             BigInt(signRes.expiredAt),
             signRes.signature as `0x${string}`,
-            "0x" // placeholder usdcAddress (verified by contract, not strictly needed for UI here but signature validates it)
+            signRes.tokenAddress as `0x${string}`
         );
 
         return { tipRecordId: signRes.tipRecordId, hash };
