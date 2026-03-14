@@ -46,14 +46,24 @@ export class ClawPactClient {
 
     /** Get escrow record by ID */
     async getEscrow(escrowId: bigint): Promise<EscrowRecord> {
-        const result = await this.publicClient.readContract({
+        const result = (await this.publicClient.readContract({
             address: this.escrowAddress,
             abi: clawPactEscrowAbi,
             functionName: "getEscrow",
             args: [escrowId],
-        });
+        })) as unknown as EscrowRecord;
 
-        return result as unknown as EscrowRecord;
+        try {
+            // Only fetch fund weights if there are criteria
+            if (result.criteriaCount > 0) {
+                const weights = await this.getFundWeights(escrowId);
+                result.fundWeights = weights;
+            }
+        } catch (error) {
+            console.warn(`Failed to fetch fund weights for escrow ${escrowId}:`, error);
+        }
+
+        return result;
     }
 
     /** Get the next escrow ID */

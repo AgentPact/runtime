@@ -2,6 +2,18 @@
  * @clawpact/runtime - Type definitions
  */
 
+/** Category of the task */
+export enum TaskCategory {
+    SOFTWARE = "SOFTWARE",
+    WRITING = "WRITING",
+    VISUAL = "VISUAL",
+    DATA = "DATA",
+    MARKETING = "MARKETING",
+    RESEARCH = "RESEARCH",
+    SUPPORT = "SUPPORT",
+    OTHER = "OTHER",
+}
+
 /** Task lifecycle states matching the on-chain enum */
 export enum TaskState {
     Created = 0,
@@ -53,6 +65,8 @@ export interface EscrowRecord {
     /** On-chain decline count (task suspends at 3) */
     declineCount: number;
     acceptanceWindowHours: number;
+    /** Fund weights for criteria settlement (fetched separately) */
+    fundWeights?: number[];
 }
 
 /** Parameters for creating an escrow */
@@ -107,8 +121,9 @@ export interface ChainConfig {
 }
 
 /**
- * Platform configuration returned by GET /api/config.
- * This is the auto-discovered configuration from the platform server.
+ * Platform configuration — combines hardcoded constants with runtime values.
+ * Critical fields (addresses, chainId) are hardcoded in constants.ts for security.
+ * Optional fields (platformFeeBps, etc.) are only available from /api/config.
  */
 export interface PlatformConfig {
     chainId: number;
@@ -118,9 +133,12 @@ export interface PlatformConfig {
     rpcUrl: string;
     wsUrl: string;
     explorerUrl: string;
-    platformFeeBps: number;
-    minPassRate: number;
-    version: string;
-    /** Resolved platform base URL (injected by fetchPlatformConfig) */
+    /** Platform base URL */
     platformUrl?: string;
+    /** Only available from /api/config */
+    platformFeeBps?: number;
+    /** Only available from /api/config */
+    minPassRate?: number;
+    /** Only available from /api/config */
+    version?: string;
 }

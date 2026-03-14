@@ -68,8 +68,15 @@ import { ClawPactClient } from "./client.js";
 import { TaskChatClient, type MessageType } from "./chat/taskChat.js";
 import { SocialClient } from "./social/socialClient.js";
 import { KnowledgeClient } from "./knowledge/knowledgeClient.js";
-import { fetchPlatformConfig } from "./config.js";
-import { DEFAULT_PLATFORM_URL } from "./constants.js";
+import {
+    DEFAULT_PLATFORM_URL,
+    DEFAULT_RPC_URL,
+    CHAIN_ID,
+    ESCROW_ADDRESS,
+    USDC_ADDRESS,
+    TIPJAR_ADDRESS,
+    EXPLORER_URL,
+} from "./constants.js";
 import type { PlatformConfig, ClaimTaskParams } from "./types.js";
 
 // ──── Configuration Types ────────────────────────────────────────
@@ -199,17 +206,22 @@ export class ClawPactAgent {
     }
 
     /**
-     * Create an agent with auto-discovery.
-     * Only `privateKey` is required — everything else is fetched from the platform.
+     * Create an agent with hardcoded chain configuration.
+     * Only `privateKey` is required — contract addresses and chain config
+     * are hardcoded for security (never trust server-provided addresses).
+     *
+     * RPC URL can be customized via `rpcUrl` option.
      */
     static async create(options: AgentCreateOptions): Promise<ClawPactAgent> {
         const baseUrl = options.platformUrl ?? DEFAULT_PLATFORM_URL;
 
-        // Step 1: Fetch remote configuration
-        const config = await fetchPlatformConfig(baseUrl);
+        // Step 1: Resolve RPC URL (user override > hardcoded default)
+        const rpcUrl = options.rpcUrl ?? DEFAULT_RPC_URL;
 
-        // Step 2: Resolve RPC URL (user override > remote config)
-        const rpcUrl = options.rpcUrl ?? config.rpcUrl;
+        // Step 2: Resolve WebSocket URL (derive from platform URL)
+        const wsUrl = baseUrl.startsWith("http://")
+            ? baseUrl.replace("http://", "ws://") + "/ws"
+            : baseUrl.replace("https://", "wss://") + "/ws";
 
         // Step 3: Create viem clients
         const pk = options.privateKey.startsWith("0x")
@@ -217,7 +229,7 @@ export class ClawPactAgent {
             : `0x${options.privateKey}` as `0x${string}`;
 
         const account = privateKeyToAccount(pk);
-        const viemChain = config.chainId === 8453 ? base : baseSepolia;
+        const viemChain = (CHAIN_ID as number) === 8453 ? base : baseSepolia;
 
         const publicClient = createPublicClient({
             chain: viemChain,
@@ -230,13 +242,14 @@ export class ClawPactAgent {
             transport: http(rpcUrl),
         });
 
+        // Step 4: Build chain config from hardcoded constants (SECURITY)
         const chainConfig = {
-            chainId: config.chainId,
+            chainId: CHAIN_ID,
             rpcUrl,
-            escrowAddress: config.escrowAddress as `0x${string}`,
-            tipJarAddress: config.tipJarAddress as `0x${string}`,
-            usdcAddress: config.usdcAddress as `0x${string}`,
-            explorerUrl: config.explorerUrl,
+            escrowAddress: ESCROW_ADDRESS,
+            tipJarAddress: TIPJAR_ADDRESS,
+            usdcAddress: USDC_ADDRESS,
+            explorerUrl: EXPLORER_URL,
         };
 
         const client = new ClawPactClient(
@@ -245,20 +258,103 @@ export class ClawPactAgent {
             walletClient as WalletClient<Transport, Chain, Account>
         );
 
-        // Step 5: Authenticate (get JWT if not provided)
-        const jwtToken = options.jwtToken ?? "";
+        // Step 5: Build platform config object (from hardcoded values)
+        const platformConfig: PlatformConfig = {
+            chainId: CHAIN_ID,
+            escrowAddress: ESCROW_ADDRESS,
+            tipJarAddress: TIPJAR_ADDRESS,
+            usdcAddress: USDC_ADDRESS,
+            rpcUrl,
+            wsUrl,
+            explorerUrl: EXPLORER_URL,
+            platformUrl: baseUrl,
+        };
+
+        // Step 6: Authenticate (auto SIWE login if no JWT provided)
+        let jwtToken = options.jwtToken ?? "";
+        if (!jwtToken) {
+            jwtToken = await ClawPactAgent.autoSiweLogin(
+                baseUrl,
+                account.address,
+                walletClient as WalletClient<Transport, Chain, Account>
+            );
+        }
 
         return new ClawPactAgent(
             {
                 client,
                 platformUrl: baseUrl,
-                wsUrl: config.wsUrl,
+                wsUrl,
                 jwtToken,
                 wsOptions: options.wsOptions,
                 autoClaimOnSignature: options.autoClaimOnSignature ?? true,
             },
-            config
+            platformConfig
         );
+    }
+
+    /**
+     * Perform automatic SIWE login to obtain a JWT token.
+     *
+     * Flow:
+     * 1. GET /api/auth/nonce?address=0x... → { nonce }
+     * 2. Construct EIP-4361 SIWE message with nonce
+     * 3. Sign message with wallet private key
+     * 4. POST /api/auth/verify { message, signature } → { token }
+     */
+    private static async autoSiweLogin(
+        platformUrl: string,
+        address: string,
+        walletClient: WalletClient<Transport, Chain, Account>
+    ): Promise<string> {
+        const baseUrl = platformUrl.replace(/\/$/, "");
+
+        // Step 1: Get nonce
+        const nonceRes = await fetch(`${baseUrl}/api/auth/nonce?address=${address}`);
+        if (!nonceRes.ok) {
+            throw new Error(
+                `SIWE nonce request failed: ${nonceRes.status} ${nonceRes.statusText}`
+            );
+        }
+        const { nonce } = (await nonceRes.json()) as { nonce: string };
+
+        // Step 2: Construct SIWE message (EIP-4361 format)
+        const domain = new URL(baseUrl).host;
+        const uri = baseUrl;
+        const issuedAt = new Date().toISOString();
+        const siweMessage = [
+            `${domain} wants you to sign in with your Ethereum account:`,
+            address,
+            "",
+            "Sign in to ClawPact",
+            "",
+            `URI: ${uri}`,
+            `Version: 1`,
+            `Chain ID: ${walletClient.chain?.id ?? 8453}`,
+            `Nonce: ${nonce}`,
+            `Issued At: ${issuedAt}`,
+        ].join("\n");
+
+        // Step 3: Sign with wallet
+        const signature = await walletClient.signMessage({
+            message: siweMessage,
+        });
+
+        // Step 4: Verify and get JWT
+        const verifyRes = await fetch(`${baseUrl}/api/auth/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: siweMessage, signature }),
+        });
+
+        if (!verifyRes.ok) {
+            throw new Error(
+                `SIWE verification failed: ${verifyRes.status} ${verifyRes.statusText}`
+            );
+        }
+
+        const { token } = (await verifyRes.json()) as { token: string };
+        return token;
     }
 
     /** Whether the agent is currently running */
@@ -271,13 +367,6 @@ export class ClawPactAgent {
      */
     async start(): Promise<void> {
         if (this._running) return;
-
-        if (!this.jwtToken) {
-            throw new Error(
-                "JWT token required to start the agent. " +
-                "Pass jwtToken in create() options, or call authenticate() first."
-            );
-        }
 
         // Set up WebSocket event forwarding
         this.ws.on("*", (raw) => {
@@ -439,7 +528,7 @@ export class ClawPactAgent {
     async getRevisionDetails(taskId: string, revision?: number): Promise<unknown> {
         const params = revision ? `?revision=${revision}` : "";
         const res = await fetch(
-            `${this.platformUrl}/api/tasks/${taskId}/revisions${params}`,
+            `${this.platformUrl}/api/revisions/${taskId}${params}`,
             { headers: this.headers() }
         );
         if (!res.ok) throw new Error(`Failed to fetch revision details: ${res.status}`);

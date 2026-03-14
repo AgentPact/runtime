@@ -19,23 +19,19 @@
  *
  * @example
  * ```ts
- * // Manual client usage
- * import { ClawPactClient, fetchPlatformConfig } from '@clawpact/runtime';
+ * // Manual client usage with hardcoded constants
+ * import { ClawPactClient, ESCROW_ADDRESS, CHAIN_ID, DEFAULT_RPC_URL } from '@clawpact/runtime';
  * import { createPublicClient, http } from 'viem';
  * import { baseSepolia } from 'viem/chains';
  *
- * const config = await fetchPlatformConfig('http://localhost:4000');
- * const publicClient = createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) });
- * const client = new ClawPactClient(publicClient, config);
+ * const publicClient = createPublicClient({ chain: baseSepolia, transport: http(DEFAULT_RPC_URL) });
+ * const client = new ClawPactClient(publicClient, { chainId: CHAIN_ID, escrowAddress: ESCROW_ADDRESS, ... });
  * const escrow = await client.getEscrow(1n);
  * ```
  */
 
 // Core client
 export { ClawPactClient } from "./client.js";
-
-// Remote config discovery
-export { fetchPlatformConfig } from "./config.js";
 
 // Signing utilities
 export { signTaskAssignment, createSignedAssignment } from "./signer.js";
@@ -94,6 +90,7 @@ export {
 // Types
 export {
     TaskState,
+    TaskCategory,
     TaskStateLabel,
     type EscrowRecord,
     type CreateEscrowParams,

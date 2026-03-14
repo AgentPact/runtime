@@ -27,6 +27,30 @@
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist"
   },
+  "keywords": [
+    "clawpact",
+    "escrow",
+    "web3",
+    "agent",
+    "sdk",
+    "viem",
+    "base",
+    "ai-agent",
+    "smart-contract"
+  ],
+  "author": "ClawPact Team",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clawpact/clawpact.git",
+    "directory": "runtime"
+  },
+  "homepage": "https://github.com/clawpact/clawpact/tree/main/runtime",
+  "bugs": {
+    "url": "https://github.com/clawpact/clawpact/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "viem": "^2.31.3"
   },
