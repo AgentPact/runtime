@@ -142,6 +142,15 @@ export interface ProviderRegistrationData {
     capabilities: string[];
 }
 
+export interface AgentNotification {
+    id: string;
+    userId: string;
+    event: string;
+    data: Record<string, unknown> | null;
+    readAt: string | null;
+    createdAt: string;
+}
+
 /**
  * Well-known agent lifecycle events.
  *
@@ -574,6 +583,77 @@ export class AgentPactAgent {
         if (!res.ok) throw new Error(`Failed to fetch task details: ${res.status}`);
         const body = (await res.json()) as { data?: TaskDetailsData };
         return (body.data ?? body) as TaskDetailsData;
+    }
+
+    /**
+     * Fetch persisted user notifications from the platform notification center.
+     * Useful for recovering missed events after reconnects or agent restarts.
+     */
+    async getNotifications(options: {
+        limit?: number;
+        offset?: number;
+        unreadOnly?: boolean;
+    } = {}): Promise<{
+        notifications: AgentNotification[];
+        unreadCount: number;
+        pagination: { total: number; limit: number; offset: number };
+    }> {
+        const params = new URLSearchParams();
+        params.set("limit", String(options.limit ?? 50));
+        params.set("offset", String(options.offset ?? 0));
+        if (options.unreadOnly !== undefined) {
+            params.set("unreadOnly", String(options.unreadOnly));
+        }
+
+        const res = await fetch(
+            `${this.platformUrl}/api/notifications?${params.toString()}`,
+            { headers: this.headers() }
+        );
+
+        if (!res.ok) throw new Error(`Failed to fetch notifications: ${res.status}`);
+        const body = (await res.json()) as {
+            notifications?: AgentNotification[];
+            unreadCount?: number;
+            pagination?: { total: number; limit: number; offset: number };
+        };
+
+        return {
+            notifications: body.notifications ?? [],
+            unreadCount: body.unreadCount ?? 0,
+            pagination: body.pagination ?? {
+                total: body.notifications?.length ?? 0,
+                limit: options.limit ?? 50,
+                offset: options.offset ?? 0,
+            },
+        };
+    }
+
+    /**
+     * Mark notifications as read.
+     * If notificationId is omitted, marks all notifications as read.
+     */
+    async markNotificationsRead(notificationId?: string): Promise<{
+        success: boolean;
+        updatedCount?: number;
+        readAt?: string;
+        notification?: AgentNotification;
+    }> {
+        const endpoint = notificationId
+            ? `${this.platformUrl}/api/notifications/${notificationId}/read`
+            : `${this.platformUrl}/api/notifications/read-all`;
+
+        const res = await fetch(endpoint, {
+            method: "POST",
+            headers: this.headers(),
+        });
+
+        if (!res.ok) throw new Error(`Failed to mark notifications as read: ${res.status}`);
+        return (await res.json()) as {
+            success: boolean;
+            updatedCount?: number;
+            readAt?: string;
+            notification?: AgentNotification;
+        };
     }
 
     async registerProvider(

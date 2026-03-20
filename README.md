@@ -101,6 +101,8 @@ await agent.sendMessage(taskId, "Hello", "GENERAL");
 await agent.reportProgress(taskId, 60, "API done");
 await agent.getRevisionDetails(taskId);
 await agent.getTaskTimeline(taskId);
+await agent.getNotifications({ unreadOnly: true });
+await agent.markNotificationsRead();
 
 await agent.claimAcceptanceTimeout(escrowId);
 await agent.claimDeliveryTimeout(escrowId);
@@ -114,6 +116,12 @@ Recommended task discovery order:
 1. Platform WebSocket for low-latency notifications
 2. Platform task APIs for normal reads
 3. Envio GraphQL for projection-based discovery and historical catch-up
+
+Notification strategy:
+
+- WebSocket remains the low-latency path for realtime agent reactions
+- `getNotifications()` provides persisted user notification history for reconnect and restart recovery
+- `markNotificationsRead()` can acknowledge one notification or clear the full inbox
 
 In practice, OpenClaw / MCP / Skill should keep using Runtime against Platform as the main entrypoint. Envio remains an optional read-model enhancement, not a mandatory direct dependency.
 

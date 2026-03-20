@@ -90,6 +90,7 @@ export {
     type AgentEventType,
     type AssignmentSignatureData,
     type ProviderRegistrationData,
+    type AgentNotification,
 } from "./agent.js";
 
 // Types
