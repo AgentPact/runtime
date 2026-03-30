@@ -147,6 +147,116 @@ export interface PlatformConfig {
     version?: string;
 }
 
+export interface TokenBalanceInfo {
+    tokenAddress: `0x${string}`;
+    symbol: string;
+    decimals: number;
+    raw: bigint;
+    formatted: string;
+}
+
+export interface AgentWalletOverview {
+    chainId: number;
+    walletAddress: `0x${string}`;
+    nativeTokenSymbol: "ETH";
+    nativeBalanceWei: bigint;
+    nativeBalanceEth: string;
+    usdc: TokenBalanceInfo;
+}
+
+export type GasQuoteAction =
+    | "approve_token"
+    | "confirm_task"
+    | "decline_task"
+    | "submit_delivery"
+    | "abandon_task"
+    | "claim_acceptance_timeout"
+    | "claim_delivery_timeout"
+    | "claim_confirmation_timeout";
+
+export interface GasQuoteRequest {
+    action: GasQuoteAction;
+    tokenAddress?: `0x${string}`;
+    spender?: `0x${string}`;
+    amount?: bigint;
+    escrowId?: bigint;
+    deliveryHash?: `0x${string}`;
+}
+
+export interface GasQuoteSummary {
+    action: GasQuoteAction;
+    chainId: number;
+    walletAddress: `0x${string}`;
+    target: `0x${string}`;
+    feeModel: "legacy" | "eip1559";
+    gasEstimate: bigint;
+    gasLimitSuggested: bigint;
+    gasPriceWei?: bigint;
+    maxFeePerGasWei?: bigint;
+    maxPriorityFeePerGasWei?: bigint;
+    estimatedTotalCostWei: bigint;
+    estimatedTotalCostEth: string;
+}
+
+export interface PreflightCheckRequest {
+    action?: GasQuoteAction;
+    tokenAddress?: `0x${string}`;
+    spender?: `0x${string}`;
+    requiredAmount?: bigint;
+    escrowId?: bigint;
+    deliveryHash?: `0x${string}`;
+    minNativeBalanceWei?: bigint;
+}
+
+export interface PreflightAllowanceInfo {
+    tokenAddress: `0x${string}`;
+    spender: `0x${string}`;
+    raw: bigint;
+    formatted: string;
+    requiredRaw?: bigint;
+    requiredFormatted?: string;
+    sufficient?: boolean;
+}
+
+export interface PreflightCheckResult {
+    action?: GasQuoteAction;
+    chainId: number;
+    expectedChainId: number;
+    walletAddress: `0x${string}`;
+    chainOk: boolean;
+    nativeBalanceWei: bigint;
+    nativeBalanceEth: string;
+    minNativeBalanceWei?: bigint;
+    gasQuote?: GasQuoteSummary;
+    gasBalanceOk?: boolean;
+    token?: TokenBalanceInfo;
+    tokenBalanceOk?: boolean;
+    allowance?: PreflightAllowanceInfo;
+    canProceed: boolean;
+    blockingReasons: string[];
+    notes: string[];
+}
+
+export interface TransactionReceiptSummary {
+    transactionHash: `0x${string}`;
+    status: "success" | "reverted";
+    blockNumber: bigint;
+    gasUsed: bigint;
+    effectiveGasPrice?: bigint;
+    explorerUrl?: string;
+}
+
+export interface TransactionStatusSummary {
+    transactionHash: `0x${string}`;
+    status: "pending" | "success" | "reverted" | "not_found";
+    found: boolean;
+    confirmations: number;
+    blockNumber?: bigint;
+    gasUsed?: bigint;
+    effectiveGasPrice?: bigint;
+    explorerUrl?: string;
+}
+
 export interface TaskTimelineItem {
     id: string;
     taskId: string;

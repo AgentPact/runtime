@@ -53,6 +53,8 @@ import {
     createPublicClient,
     createWalletClient,
     http,
+    formatEther,
+    formatUnits,
     type PublicClient,
     type WalletClient,
     type Transport,
@@ -84,6 +86,14 @@ import type {
     TaskTimelineItem,
     TaskDetailsData,
     TaskListItem,
+    AgentWalletOverview,
+    GasQuoteRequest,
+    GasQuoteSummary,
+    PreflightCheckRequest,
+    PreflightCheckResult,
+    TokenBalanceInfo,
+    TransactionReceiptSummary,
+    TransactionStatusSummary,
 } from "./types.js";
 
 // ──── Configuration Types ────────────────────────────────────────
@@ -115,6 +125,7 @@ export interface AgentConfig {
     platformUrl: string;
     wsUrl: string;
     jwtToken: string;
+    walletAddress: `0x${string}`;
     wsOptions?: WebSocketOptions;
     autoClaimOnSignature: boolean;
 }
@@ -193,6 +204,7 @@ export class AgentPactAgent {
     readonly social: SocialClient;
     readonly knowledge: KnowledgeClient;
     readonly platformConfig: PlatformConfig;
+    readonly walletAddress: `0x${string}`;
     private ws: AgentPactWebSocket;
     private platformUrl: string;
     private jwtToken: string;
@@ -208,6 +220,7 @@ export class AgentPactAgent {
         this.client = config.client;
         this.platformUrl = config.platformUrl.replace(/\/$/, "");
         this.jwtToken = config.jwtToken;
+        this.walletAddress = config.walletAddress;
         this.ws = new AgentPactWebSocket(config.wsUrl, config.wsOptions);
         this.chat = new TaskChatClient(this.platformUrl, this.jwtToken);
         this.social = new SocialClient(this.platformUrl, this.jwtToken, { client: this.client });
@@ -305,6 +318,7 @@ export class AgentPactAgent {
                 platformUrl: baseUrl,
                 wsUrl,
                 jwtToken,
+                walletAddress: account.address,
                 wsOptions: options.wsOptions,
                 autoClaimOnSignature: options.autoClaimOnSignature ?? true,
             },
@@ -437,6 +451,202 @@ export class AgentPactAgent {
     /** Stop watching a task */
     unwatchTask(taskId: string): void {
         this.subscribedTasks.delete(taskId);
+    }
+
+    /** Get the current agent wallet's native ETH balance */
+    async getNativeBalance(): Promise<bigint> {
+        return this.client.getNativeBalance(this.walletAddress);
+    }
+
+    /** Get the current agent wallet's configured USDC balance */
+    async getUsdcBalance(): Promise<bigint> {
+        return this.client.getUsdcBalance(this.walletAddress);
+    }
+
+    /** Get a wallet overview for the current agent wallet */
+    async getWalletOverview(): Promise<AgentWalletOverview> {
+        const nativeBalanceWei = await this.getNativeBalance();
+        const usdcAddress = this.platformConfig.usdcAddress;
+        const [usdcRaw, usdcDecimals, usdcSymbol] = await Promise.all([
+            this.getUsdcBalance(),
+            this.client.getTokenDecimals(usdcAddress),
+            this.client.getTokenSymbol(usdcAddress),
+        ]);
+
+        return {
+            chainId: this.platformConfig.chainId,
+            walletAddress: this.walletAddress,
+            nativeTokenSymbol: "ETH",
+            nativeBalanceWei,
+            nativeBalanceEth: formatEther(nativeBalanceWei),
+            usdc: {
+                tokenAddress: usdcAddress,
+                symbol: usdcSymbol,
+                decimals: usdcDecimals,
+                raw: usdcRaw,
+                formatted: formatUnits(usdcRaw, usdcDecimals),
+            },
+        };
+    }
+
+    /** Get the current agent wallet's balance for an arbitrary ERC20 token */
+    async getTokenBalanceInfo(token: `0x${string}`): Promise<TokenBalanceInfo> {
+        const [raw, decimals, symbol] = await Promise.all([
+            this.client.getTokenBalance(token, this.walletAddress),
+            this.client.getTokenDecimals(token),
+            this.client.getTokenSymbol(token),
+        ]);
+
+        return {
+            tokenAddress: token,
+            symbol,
+            decimals,
+            raw,
+            formatted: formatUnits(raw, decimals),
+        };
+    }
+
+    /** Get the current agent wallet's allowance for a spender */
+    async getTokenAllowance(
+        token: `0x${string}`,
+        spender: `0x${string}`
+    ): Promise<bigint> {
+        return this.client.getTokenAllowance(token, this.walletAddress, spender);
+    }
+
+    /** Approve an ERC20 spender from the current agent wallet */
+    async approveToken(
+        token: `0x${string}`,
+        spender: `0x${string}`,
+        amount?: bigint
+    ): Promise<string> {
+        const txHash = await this.client.approveToken(token, spender, amount);
+        console.log(`[Agent] Token approval submitted on-chain: ${txHash}`);
+        return txHash;
+    }
+
+    /** Wait for a transaction receipt */
+    async waitForTransaction(
+        hash: `0x${string}`,
+        options?: {
+            confirmations?: number;
+            timeoutMs?: number;
+        }
+    ): Promise<TransactionReceiptSummary> {
+        return this.client.waitForTransaction(hash, options);
+    }
+
+    /** Read the latest observable status of a transaction */
+    async getTransactionStatus(hash: `0x${string}`): Promise<TransactionStatusSummary> {
+        return this.client.getTransactionStatus(hash);
+    }
+
+    /** Estimate gas and fee cost for a supported write action */
+    async getGasQuote(params: GasQuoteRequest): Promise<GasQuoteSummary> {
+        return this.client.getGasQuote(params);
+    }
+
+    /** Run a lightweight safety check before a gas-spending or token-spending action */
+    async preflightCheck(params: PreflightCheckRequest = {}): Promise<PreflightCheckResult> {
+        const notes: string[] = [];
+        const blockingReasons: string[] = [];
+        const chainId = await this.client.getChainId();
+        const wallet = await this.getWalletOverview();
+
+        const chainOk = chainId === this.platformConfig.chainId;
+        if (!chainOk) {
+            blockingReasons.push(
+                `Connected chainId ${chainId} does not match expected chainId ${this.platformConfig.chainId}`
+            );
+        }
+
+        let gasQuote: GasQuoteSummary | undefined;
+        if (params.action) {
+            gasQuote = await this.getGasQuote({
+                action: params.action,
+                tokenAddress: params.tokenAddress,
+                spender: params.spender,
+                requiredAmount: undefined,
+                amount: params.requiredAmount,
+                escrowId: params.escrowId,
+                deliveryHash: params.deliveryHash,
+            } as GasQuoteRequest & { requiredAmount?: bigint });
+        } else {
+            notes.push("No action-specific gas quote requested.");
+        }
+
+        const minNativeBalanceWei = params.minNativeBalanceWei ?? gasQuote?.estimatedTotalCostWei;
+        const gasBalanceOk = minNativeBalanceWei !== undefined
+            ? wallet.nativeBalanceWei >= minNativeBalanceWei
+            : undefined;
+        if (gasBalanceOk === false) {
+            blockingReasons.push(
+                `Native ETH balance ${wallet.nativeBalanceEth} is below the required threshold`
+            );
+        }
+
+        let token: TokenBalanceInfo | undefined;
+        let tokenBalanceOk: boolean | undefined;
+        if (params.tokenAddress) {
+            token = await this.getTokenBalanceInfo(params.tokenAddress);
+            if (params.requiredAmount !== undefined) {
+                tokenBalanceOk = token.raw >= params.requiredAmount;
+                if (!tokenBalanceOk) {
+                    blockingReasons.push(
+                        `Token balance ${token.formatted} ${token.symbol} is below the required amount`
+                    );
+                }
+            }
+        }
+
+        let allowance: PreflightCheckResult["allowance"];
+        if (params.tokenAddress && params.spender) {
+            const allowanceRaw = await this.getTokenAllowance(params.tokenAddress, params.spender);
+            const decimals = token?.decimals ?? await this.client.getTokenDecimals(params.tokenAddress);
+            allowance = {
+                tokenAddress: params.tokenAddress,
+                spender: params.spender,
+                raw: allowanceRaw,
+                formatted: formatUnits(allowanceRaw, decimals),
+            };
+
+            if (params.requiredAmount !== undefined) {
+                allowance.requiredRaw = params.requiredAmount;
+                allowance.requiredFormatted = formatUnits(params.requiredAmount, decimals);
+                allowance.sufficient = allowanceRaw >= params.requiredAmount;
+                if (!allowance.sufficient) {
+                    blockingReasons.push(
+                        `Allowance ${allowance.formatted} is below the required amount ${allowance.requiredFormatted}`
+                    );
+                }
+            }
+        }
+
+        if (!params.tokenAddress) {
+            notes.push("No token balance check requested.");
+        }
+        if (!params.spender) {
+            notes.push("No allowance check requested.");
+        }
+
+        return {
+            action: params.action,
+            chainId,
+            expectedChainId: this.platformConfig.chainId,
+            walletAddress: this.walletAddress,
+            chainOk,
+            nativeBalanceWei: wallet.nativeBalanceWei,
+            nativeBalanceEth: wallet.nativeBalanceEth,
+            minNativeBalanceWei,
+            gasQuote,
+            gasBalanceOk,
+            token,
+            tokenBalanceOk,
+            allowance,
+            canProceed: blockingReasons.length === 0,
+            blockingReasons,
+            notes,
+        };
     }
 
     // ──── Task Lifecycle Methods ─────────────────────────────────────

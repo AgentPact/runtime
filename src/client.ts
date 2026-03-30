@@ -12,6 +12,7 @@ import {
     type Account,
     type Hash,
     erc20Abi,
+    formatEther,
     maxUint256,
 } from "viem";
 import { ESCROW_ABI as clawPactEscrowAbi, TIPJAR_ABI as clawPactTipJarAbi } from "./abi.js";
@@ -22,6 +23,9 @@ import type {
     RequestRevisionParams,
     ClaimTaskParams,
     ChainConfig,
+    GasQuoteRequest,
+    GasQuoteSummary,
+    TransactionStatusSummary,
 } from "./types.js";
 import { TaskState } from "./types.js";
 
@@ -30,6 +34,8 @@ export class AgentPactClient {
     private readonly walletClient?: WalletClient<Transport, Chain, Account>;
     private readonly escrowAddress: `0x${string}`;
     private readonly tipJarAddress: `0x${string}`;
+    private readonly usdcAddress: `0x${string}`;
+    private readonly explorerUrl: string;
 
     constructor(
         publicClient: PublicClient,
@@ -40,6 +46,8 @@ export class AgentPactClient {
         this.walletClient = walletClient;
         this.escrowAddress = config.escrowAddress;
         this.tipJarAddress = config.tipJarAddress;
+        this.usdcAddress = config.usdcAddress;
+        this.explorerUrl = config.explorerUrl.replace(/\/$/, "");
     }
 
     // ========================= Read Functions =========================
@@ -124,6 +132,213 @@ export class AgentPactClient {
         }) as Promise<`0x${string}`>;
     }
 
+    /** Get the active RPC chain ID */
+    async getChainId(): Promise<number> {
+        return this.publicClient.getChainId();
+    }
+
+    /** Get native ETH balance for an address */
+    async getNativeBalance(address: `0x${string}`): Promise<bigint> {
+        return this.publicClient.getBalance({ address });
+    }
+
+    /** Get ERC20 token balance for an address */
+    async getTokenBalance(
+        token: `0x${string}`,
+        address: `0x${string}`
+    ): Promise<bigint> {
+        return this.publicClient.readContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: "balanceOf",
+            args: [address],
+        }) as Promise<bigint>;
+    }
+
+    /** Get ERC20 decimals metadata */
+    async getTokenDecimals(token: `0x${string}`): Promise<number> {
+        return this.publicClient.readContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: "decimals",
+        }) as Promise<number>;
+    }
+
+    /** Get ERC20 symbol metadata */
+    async getTokenSymbol(token: `0x${string}`): Promise<string> {
+        return this.publicClient.readContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: "symbol",
+        }) as Promise<string>;
+    }
+
+    /** Get configured USDC balance for an address */
+    async getUsdcBalance(address: `0x${string}`): Promise<bigint> {
+        return this.getTokenBalance(this.usdcAddress, address);
+    }
+
+    /** Get ERC20 token allowance for owner -> spender */
+    async getTokenAllowance(
+        token: `0x${string}`,
+        owner: `0x${string}`,
+        spender: `0x${string}`
+    ): Promise<bigint> {
+        return this.publicClient.readContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: "allowance",
+            args: [owner, spender],
+        }) as Promise<bigint>;
+    }
+
+    /** Estimate gas and fee cost for a supported write action */
+    async getGasQuote(params: GasQuoteRequest): Promise<GasQuoteSummary> {
+        const wallet = this.requireWallet();
+        const chainId = await this.getChainId();
+        const fees = await this.getFeeQuote();
+        const effectiveFeePerGas = fees.maxFeePerGasWei ?? fees.gasPriceWei ?? 0n;
+
+        let target: `0x${string}`;
+        let gasEstimate: bigint;
+
+        switch (params.action) {
+            case "approve_token": {
+                if (!params.tokenAddress || !params.spender) {
+                    throw new Error("approve_token requires tokenAddress and spender");
+                }
+                target = params.tokenAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: params.tokenAddress,
+                    abi: erc20Abi,
+                    functionName: "approve",
+                    args: [params.spender, params.amount ?? maxUint256],
+                });
+                break;
+            }
+            case "confirm_task": {
+                if (params.escrowId === undefined) {
+                    throw new Error("confirm_task requires escrowId");
+                }
+                target = this.escrowAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: this.escrowAddress,
+                    abi: clawPactEscrowAbi,
+                    functionName: "confirmTask",
+                    args: [params.escrowId],
+                });
+                break;
+            }
+            case "decline_task": {
+                if (params.escrowId === undefined) {
+                    throw new Error("decline_task requires escrowId");
+                }
+                target = this.escrowAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: this.escrowAddress,
+                    abi: clawPactEscrowAbi,
+                    functionName: "declineTask",
+                    args: [params.escrowId],
+                });
+                break;
+            }
+            case "submit_delivery": {
+                if (params.escrowId === undefined || !params.deliveryHash) {
+                    throw new Error("submit_delivery requires escrowId and deliveryHash");
+                }
+                target = this.escrowAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: this.escrowAddress,
+                    abi: clawPactEscrowAbi,
+                    functionName: "submitDelivery",
+                    args: [params.escrowId, params.deliveryHash],
+                });
+                break;
+            }
+            case "abandon_task": {
+                if (params.escrowId === undefined) {
+                    throw new Error("abandon_task requires escrowId");
+                }
+                target = this.escrowAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: this.escrowAddress,
+                    abi: clawPactEscrowAbi,
+                    functionName: "abandonTask",
+                    args: [params.escrowId],
+                });
+                break;
+            }
+            case "claim_acceptance_timeout": {
+                if (params.escrowId === undefined) {
+                    throw new Error("claim_acceptance_timeout requires escrowId");
+                }
+                target = this.escrowAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: this.escrowAddress,
+                    abi: clawPactEscrowAbi,
+                    functionName: "claimAcceptanceTimeout",
+                    args: [params.escrowId],
+                });
+                break;
+            }
+            case "claim_delivery_timeout": {
+                if (params.escrowId === undefined) {
+                    throw new Error("claim_delivery_timeout requires escrowId");
+                }
+                target = this.escrowAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: this.escrowAddress,
+                    abi: clawPactEscrowAbi,
+                    functionName: "claimDeliveryTimeout",
+                    args: [params.escrowId],
+                });
+                break;
+            }
+            case "claim_confirmation_timeout": {
+                if (params.escrowId === undefined) {
+                    throw new Error("claim_confirmation_timeout requires escrowId");
+                }
+                target = this.escrowAddress;
+                gasEstimate = await this.publicClient.estimateContractGas({
+                    account: wallet.account,
+                    address: this.escrowAddress,
+                    abi: clawPactEscrowAbi,
+                    functionName: "claimConfirmationTimeout",
+                    args: [params.escrowId],
+                });
+                break;
+            }
+            default: {
+                throw new Error(`Unsupported gas quote action: ${String(params.action)}`);
+            }
+        }
+
+        const gasLimitSuggested = (gasEstimate * 12n) / 10n;
+        const estimatedTotalCostWei = gasLimitSuggested * effectiveFeePerGas;
+
+        return {
+            action: params.action,
+            chainId,
+            walletAddress: wallet.account.address,
+            target,
+            feeModel: fees.maxFeePerGasWei ? "eip1559" : "legacy",
+            gasEstimate,
+            gasLimitSuggested,
+            gasPriceWei: fees.gasPriceWei,
+            maxFeePerGasWei: fees.maxFeePerGasWei,
+            maxPriorityFeePerGasWei: fees.maxPriorityFeePerGasWei,
+            estimatedTotalCostWei,
+            estimatedTotalCostEth: formatEther(estimatedTotalCostWei),
+        };
+    }
+
     // ========================= Write Functions =========================
 
     private requireWallet(): WalletClient<Transport, Chain, Account> {
@@ -188,7 +403,7 @@ export class AgentPactClient {
         });
     }
 
-    /** Confirm task after reviewing materials â€?sets deliveryDeadline on-chain */
+    /** Confirm task after reviewing materials ï¿½?sets deliveryDeadline on-chain */
     async confirmTask(escrowId: bigint): Promise<Hash> {
         const wallet = this.requireWallet();
         return wallet.writeContract({
@@ -246,7 +461,7 @@ export class AgentPactClient {
         });
     }
 
-    /** Request revision with per-criterion pass/fail â€?passRate computed on-chain */
+    /** Request revision with per-criterion pass/fail ï¿½?passRate computed on-chain */
     async requestRevision(params: RequestRevisionParams): Promise<Hash> {
         const wallet = this.requireWallet();
         return wallet.writeContract({
@@ -334,6 +549,117 @@ export class AgentPactClient {
         });
     }
 
+    /** Approve an ERC20 spender */
+    async approveToken(
+        token: `0x${string}`,
+        spender: `0x${string}`,
+        amount: bigint = maxUint256
+    ): Promise<Hash> {
+        const wallet = this.requireWallet();
+        return wallet.writeContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: "approve",
+            args: [spender, amount],
+        });
+    }
+
+    /** Wait for a transaction receipt */
+    async waitForTransaction(
+        hash: `0x${string}`,
+        options: {
+            confirmations?: number;
+            timeoutMs?: number;
+        } = {}
+    ): Promise<{
+        transactionHash: `0x${string}`;
+        status: "success" | "reverted";
+        blockNumber: bigint;
+        gasUsed: bigint;
+        effectiveGasPrice?: bigint;
+        explorerUrl?: string;
+    }> {
+        const receipt = await this.publicClient.waitForTransactionReceipt({
+            hash,
+            confirmations: options.confirmations ?? 1,
+            timeout: options.timeoutMs,
+        });
+
+        return {
+            transactionHash: receipt.transactionHash,
+            status: receipt.status === "success" ? "success" : "reverted",
+            blockNumber: receipt.blockNumber,
+            gasUsed: receipt.gasUsed,
+            effectiveGasPrice: receipt.effectiveGasPrice,
+            explorerUrl: this.getExplorerTxUrl(receipt.transactionHash),
+        };
+    }
+
+    /** Get the current status of a transaction without waiting */
+    async getTransactionStatus(hash: `0x${string}`): Promise<TransactionStatusSummary> {
+        try {
+            const receipt = await this.publicClient.getTransactionReceipt({ hash });
+            const latestBlock = await this.publicClient.getBlockNumber();
+            const confirmations = latestBlock >= receipt.blockNumber
+                ? Number(latestBlock - receipt.blockNumber + 1n)
+                : 0;
+
+            return {
+                transactionHash: receipt.transactionHash,
+                status: receipt.status === "success" ? "success" : "reverted",
+                found: true,
+                confirmations,
+                blockNumber: receipt.blockNumber,
+                gasUsed: receipt.gasUsed,
+                effectiveGasPrice: receipt.effectiveGasPrice,
+                explorerUrl: this.getExplorerTxUrl(receipt.transactionHash),
+            };
+        } catch {
+            try {
+                const tx = await this.publicClient.getTransaction({ hash });
+                return {
+                    transactionHash: tx.hash,
+                    status: "pending",
+                    found: true,
+                    confirmations: 0,
+                    explorerUrl: this.getExplorerTxUrl(tx.hash),
+                };
+            } catch {
+                return {
+                    transactionHash: hash,
+                    status: "not_found",
+                    found: false,
+                    confirmations: 0,
+                    explorerUrl: this.getExplorerTxUrl(hash),
+                };
+            }
+        }
+    }
+
+    /** Build a block explorer transaction URL */
+    getExplorerTxUrl(hash: `0x${string}`): string {
+        return `${this.explorerUrl}/tx/${hash}`;
+    }
+
+    private async getFeeQuote(): Promise<{
+        gasPriceWei?: bigint;
+        maxFeePerGasWei?: bigint;
+        maxPriorityFeePerGasWei?: bigint;
+    }> {
+        try {
+            const fees = await this.publicClient.estimateFeesPerGas();
+            return {
+                gasPriceWei: fees.gasPrice,
+                maxFeePerGasWei: fees.maxFeePerGas,
+                maxPriorityFeePerGasWei: fees.maxPriorityFeePerGas,
+            };
+        } catch {
+            return {
+                gasPriceWei: await this.publicClient.getGasPrice(),
+            };
+        }
+    }
+
     // ========================= Utility =========================
 
     /** Calculate deposit rate based on maxRevisions */
@@ -386,20 +712,14 @@ export class AgentPactClient {
         target: `0x${string}`
     ): Promise<void> {
         const wallet = this.requireWallet();
-        const currentAllowance = (await this.publicClient.readContract({
-            address: token,
-            abi: erc20Abi,
-            functionName: "allowance",
-            args: [wallet.account.address, target],
-        })) as bigint;
+        const currentAllowance = await this.getTokenAllowance(
+            token,
+            wallet.account.address,
+            target
+        );
 
         if (currentAllowance < amount) {
-            const hash = await wallet.writeContract({
-                address: token,
-                abi: erc20Abi,
-                functionName: "approve",
-                args: [target, maxUint256],
-            });
+            const hash = await this.approveToken(token, target, maxUint256);
             await this.publicClient.waitForTransactionReceipt({ hash });
         }
     }
