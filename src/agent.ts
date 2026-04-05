@@ -521,7 +521,7 @@ export class AgentPactAgent {
         amount?: bigint
     ): Promise<string> {
         const txHash = await this.client.approveToken(token, spender, amount);
-        console.log(`[Agent] Token approval submitted on-chain: ${txHash}`);
+        console.error(`[Agent] Token approval submitted on-chain: ${txHash}`);
         return txHash;
     }
 
@@ -657,7 +657,7 @@ export class AgentPactAgent {
      */
     async confirmTask(escrowId: bigint): Promise<string> {
         const txHash = await this.client.confirmTask(escrowId);
-        console.log(`[Agent] Task confirmed on-chain: ${txHash}`);
+        console.error(`[Agent] Task confirmed on-chain: ${txHash}`);
         return txHash;
     }
 
@@ -667,7 +667,7 @@ export class AgentPactAgent {
      */
     async declineTask(escrowId: bigint): Promise<string> {
         const txHash = await this.client.declineTask(escrowId);
-        console.log(`[Agent] Task declined on-chain: ${txHash}`);
+        console.error(`[Agent] Task declined on-chain: ${txHash}`);
         return txHash;
     }
 
@@ -678,7 +678,7 @@ export class AgentPactAgent {
     async submitDelivery(escrowId: bigint, deliveryHash: string): Promise<string> {
         const formattedHash = deliveryHash.startsWith('0x') ? deliveryHash as `0x${string}` : `0x${deliveryHash}` as `0x${string}`;
         const txHash = await this.client.submitDelivery(escrowId, formattedHash);
-        console.log(`[Agent] Delivery submitted on-chain: ${txHash} for escrow: ${escrowId}`);
+        console.error(`[Agent] Delivery submitted on-chain: ${txHash} for escrow: ${escrowId}`);
         return txHash;
     }
 
@@ -688,7 +688,7 @@ export class AgentPactAgent {
      */
     async abandonTask(escrowId: bigint): Promise<string> {
         const txHash = await this.client.abandonTask(escrowId);
-        console.log(`[Agent] Task abandoned on-chain: ${txHash}`);
+        console.error(`[Agent] Task abandoned on-chain: ${txHash}`);
         return txHash;
     }
 
@@ -714,7 +714,7 @@ export class AgentPactAgent {
             }
         );
         if (!res.ok) throw new Error(`Failed to report progress: ${res.status}`);
-        console.log(`[Agent] Progress reported: ${percent}% — ${description}`);
+        console.error(`[Agent] Progress reported: ${percent}% — ${description}`);
     }
 
     /**
@@ -723,7 +723,7 @@ export class AgentPactAgent {
      */
     async claimAcceptanceTimeout(escrowId: bigint): Promise<string> {
         const txHash = await this.client.claimAcceptanceTimeout(escrowId);
-        console.log(`[Agent] Acceptance timeout claimed: ${txHash}`);
+        console.error(`[Agent] Acceptance timeout claimed: ${txHash}`);
         return txHash;
     }
 
@@ -733,7 +733,7 @@ export class AgentPactAgent {
      */
     async claimDeliveryTimeout(escrowId: bigint): Promise<string> {
         const txHash = await this.client.claimDeliveryTimeout(escrowId);
-        console.log(`[Agent] Delivery timeout claimed: ${txHash}`);
+        console.error(`[Agent] Delivery timeout claimed: ${txHash}`);
         return txHash;
     }
 
@@ -743,7 +743,7 @@ export class AgentPactAgent {
      */
     async claimConfirmationTimeout(escrowId: bigint): Promise<string> {
         const txHash = await this.client.claimConfirmationTimeout(escrowId);
-        console.log(`[Agent] Confirmation timeout claimed: ${txHash}`);
+        console.error(`[Agent] Confirmation timeout claimed: ${txHash}`);
         return txHash;
     }
 
@@ -987,15 +987,15 @@ export class AgentPactAgent {
             platformSignature: data.signature as `0x${string}`,
         };
 
-        console.log(`[Agent] Assignment signature received for escrow ${claimParams.escrowId}`);
-        console.log(`[Agent] Auto-claiming task on-chain...`);
+        console.error(`[Agent] Assignment signature received for escrow ${claimParams.escrowId}`);
+        console.error(`[Agent] Auto-claiming task on-chain...`);
 
         // Fire-and-forget: claimTask on-chain, then notify via TASK_CLAIMED event
         this.client
             .claimTask(claimParams)
             .then((txHash: any) => {
-                console.log(`[Agent] claimTask() tx: ${txHash}`);
-                console.log(`[Agent] Task claimed. Waiting for confidential materials (TASK_DETAILS)...`);
+                console.error(`[Agent] claimTask() tx: ${txHash}`);
+                console.error(`[Agent] Task claimed. Waiting for confidential materials (TASK_DETAILS)...`);
 
                 // Dispatch internal event so user can track claim success
                 this.dispatch("TASK_CLAIMED", {
