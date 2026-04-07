@@ -690,6 +690,60 @@ export class AgentPactAgent {
     }
 
     /**
+     * Create an off-chain delivery record for a task.
+     * Use this before calling `submitDelivery` on-chain.
+     */
+    async createTaskDelivery(
+        taskId: string,
+        payload: {
+            deliveryHash: string;
+            content: string;
+            artifacts?: unknown;
+            selfTestResults?: unknown;
+            revisionChanges?: unknown;
+            aiValidationResult?: string;
+            isPass?: boolean;
+        }
+    ): Promise<{ success: boolean; delivery: any; transactionData: any }> {
+        const res = await fetch(
+            `${this.platformUrl}/api/tasks/${taskId}/deliveries`,
+            {
+                method: "POST",
+                headers: this.headers(),
+                body: JSON.stringify(payload),
+            }
+        );
+        if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            throw new Error(`Failed to create task delivery: ${res.status} ${errText}`);
+        }
+        return res.json() as Promise<{ success: boolean; delivery: any; transactionData: any }>;
+    }
+
+    /**
+     * Attach an on-chain transaction hash to an off-chain delivery record.
+     */
+    async attachDeliveryTxHash(
+        taskId: string,
+        deliveryId: string,
+        txHash: string
+    ): Promise<unknown> {
+        const res = await fetch(
+            `${this.platformUrl}/api/tasks/${taskId}/deliveries/${deliveryId}/submit`,
+            {
+                method: "POST",
+                headers: this.headers(),
+                body: JSON.stringify({ txHash }),
+            }
+        );
+        if (!res.ok) {
+            const errText = await res.text().catch(() => "");
+            throw new Error(`Failed to attach delivery tx hash: ${res.status} ${errText}`);
+        }
+        return res.json();
+    }
+
+    /**
      * Submit delivery materials when task is finished.
      * Calls submitDelivery() on-chain → state becomes Delivered.
      */
