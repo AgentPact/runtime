@@ -217,33 +217,10 @@ export class AgentPactClient {
                 });
                 break;
             }
-            case "confirm_task": {
-                if (params.escrowId === undefined) {
-                    throw new Error("confirm_task requires escrowId");
-                }
-                target = this.escrowAddress;
-                gasEstimate = await this.publicClient.estimateContractGas({
-                    account: wallet.account,
-                    address: this.escrowAddress,
-                    abi: clawPactEscrowAbi,
-                    functionName: "confirmTask",
-                    args: [params.escrowId],
-                });
-                break;
-            }
-            case "decline_task": {
-                if (params.escrowId === undefined) {
-                    throw new Error("decline_task requires escrowId");
-                }
-                target = this.escrowAddress;
-                gasEstimate = await this.publicClient.estimateContractGas({
-                    account: wallet.account,
-                    address: this.escrowAddress,
-                    abi: clawPactEscrowAbi,
-                    functionName: "declineTask",
-                    args: [params.escrowId],
-                });
-                break;
+            case "claim_task": {
+                throw new Error(
+                    "claim_task gas quotes require a live assignment signature and are not supported by the generic estimator"
+                );
             }
             case "submit_delivery": {
                 if (params.escrowId === undefined || !params.deliveryHash) {
@@ -297,20 +274,6 @@ export class AgentPactClient {
                     address: this.escrowAddress,
                     abi: clawPactEscrowAbi,
                     functionName: "claimDeliveryTimeout",
-                    args: [params.escrowId],
-                });
-                break;
-            }
-            case "claim_confirmation_timeout": {
-                if (params.escrowId === undefined) {
-                    throw new Error("claim_confirmation_timeout requires escrowId");
-                }
-                target = this.escrowAddress;
-                gasEstimate = await this.publicClient.estimateContractGas({
-                    account: wallet.account,
-                    address: this.escrowAddress,
-                    abi: clawPactEscrowAbi,
-                    functionName: "claimConfirmationTimeout",
                     args: [params.escrowId],
                 });
                 break;
@@ -403,26 +366,16 @@ export class AgentPactClient {
         });
     }
 
-    /** Confirm task after reviewing materials �?sets deliveryDeadline on-chain */
-    async confirmTask(escrowId: bigint): Promise<Hash> {
-        const wallet = this.requireWallet();
-        return wallet.writeContract({
-            address: this.escrowAddress,
-            abi: clawPactEscrowAbi,
-            functionName: "confirmTask",
-            args: [escrowId],
-        });
+    /** Legacy helper retained for compatibility with older hosts. */
+    async confirmTask(_escrowId: bigint): Promise<Hash> {
+        throw new Error("confirmTask() has been removed. Claiming now starts work immediately.");
     }
 
-    /** Decline task during confirmation window (tracked on-chain, 3x causes suspension) */
-    async declineTask(escrowId: bigint): Promise<Hash> {
-        const wallet = this.requireWallet();
-        return wallet.writeContract({
-            address: this.escrowAddress,
-            abi: clawPactEscrowAbi,
-            functionName: "declineTask",
-            args: [escrowId],
-        });
+    /** Legacy helper retained for compatibility with older hosts. */
+    async declineTask(_escrowId: bigint): Promise<Hash> {
+        throw new Error(
+            "declineTask() has been removed. Reject the invitation off-chain before claiming the task."
+        );
     }
 
     /** Submit delivery artifacts */
@@ -472,7 +425,7 @@ export class AgentPactClient {
         });
     }
 
-    /** Cancel task (only from Created/ConfirmationPending) */
+    /** Cancel task before any provider has claimed it on-chain. */
     async cancelTask(escrowId: bigint): Promise<Hash> {
         const wallet = this.requireWallet();
         return wallet.writeContract({
@@ -505,15 +458,11 @@ export class AgentPactClient {
         });
     }
 
-    /** Claim confirmation timeout */
-    async claimConfirmationTimeout(escrowId: bigint): Promise<Hash> {
-        const wallet = this.requireWallet();
-        return wallet.writeContract({
-            address: this.escrowAddress,
-            abi: clawPactEscrowAbi,
-            functionName: "claimConfirmationTimeout",
-            args: [escrowId],
-        });
+    /** Legacy helper retained for compatibility with older hosts. */
+    async claimConfirmationTimeout(_escrowId: bigint): Promise<Hash> {
+        throw new Error(
+            "claimConfirmationTimeout() has been removed. Before claim, reassign off-chain; after claim, use abandonTask or timeout paths."
+        );
     }
 
     /** Send a tip using the signed payload from the platform */

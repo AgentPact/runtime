@@ -114,7 +114,7 @@ export interface AgentCreateOptions {
     wsOptions?: WebSocketOptions;
     /**
      * Automatically call claimTask() on-chain when ASSIGNMENT_SIGNATURE is received.
-     * Default: true (deterministic, no LLM needed)
+     * Default: false, so agents can review confidential details before deciding.
      */
     autoClaimOnSignature?: boolean;
 }
@@ -166,10 +166,9 @@ export interface AgentNotification {
  * Well-known agent lifecycle events.
  *
  * TASK_CREATED          - New task published on platform
- * ASSIGNMENT_SIGNATURE  - Platform selected this agent; EIP-712 signature delivered
- * TASK_DETAILS          - Confidential materials sent after on-chain claim
- * TASK_CONFIRMED        - Agent confirmed the task, now in Working state
- * TASK_DECLINED         - Agent declined after reviewing confidential materials
+ * ASSIGNMENT_SIGNATURE  - Platform selected this agent; claim signature delivered for manual decision
+ * TASK_DETAILS          - Confidential materials payload pushed by the platform
+ * TASK_CLAIMED          - Agent claimed the task and entered Working
  * REVISION_REQUESTED    - Requester requested revision with criteria results
  * TASK_ACCEPTED         - Requester accepted delivery, funds released
  * TASK_DELIVERED        - Delivery submitted (hash on-chain)
@@ -182,8 +181,7 @@ export type AgentEventType =
     | "TASK_CREATED"
     | "ASSIGNMENT_SIGNATURE"
     | "TASK_DETAILS"
-    | "TASK_CONFIRMED"
-    | "TASK_DECLINED"
+    | "TASK_CLAIMED"
     | "REVISION_REQUESTED"
     | "TASK_ACCEPTED"
     | "TASK_DELIVERED"
@@ -209,6 +207,7 @@ export class AgentPactAgent {
     private platformUrl: string;
     private jwtToken: string;
     private autoClaimOnSignature: boolean;
+    private assignmentSignatures = new Map<string, AssignmentSignatureData>();
     private handlers = new Map<string, Set<(data: TaskEvent) => void | Promise<void>>>();
     private subscribedTasks = new Set<string>();
     private _running = false;
@@ -320,7 +319,7 @@ export class AgentPactAgent {
                 jwtToken,
                 walletAddress: account.address,
                 wsOptions: options.wsOptions,
-                autoClaimOnSignature: options.autoClaimOnSignature ?? true,
+            autoClaimOnSignature: options.autoClaimOnSignature ?? false,
             },
             platformConfig
         );
@@ -670,22 +669,77 @@ export class AgentPactAgent {
     // ──── Task Lifecycle Methods ─────────────────────────────────────
 
     /**
-     * Confirm a task after reviewing confidential materials.
-     * Calls confirmTask() on-chain → state becomes Working.
+     * Legacy helper retained for compatibility with older hosts.
      */
     async confirmTask(escrowId: bigint): Promise<string> {
-        const txHash = await this.client.confirmTask(escrowId);
-        console.error(`[Agent] Task confirmed on-chain: ${txHash}`);
-        return txHash;
+        return this.client.confirmTask(escrowId);
     }
 
     /**
-     * Decline a task after reviewing confidential materials.
-     * Calls declineTask() on-chain → state returns to Created for next agent.
+     * Legacy helper retained for compatibility with older hosts.
      */
     async declineTask(escrowId: bigint): Promise<string> {
-        const txHash = await this.client.declineTask(escrowId);
-        console.error(`[Agent] Task declined on-chain: ${txHash}`);
+        return this.client.declineTask(escrowId);
+    }
+
+    /**
+     * Returns the cached assignment signature for a selected task, if present.
+     */
+    getAssignmentSignature(taskId: string): AssignmentSignatureData | undefined {
+        return this.assignmentSignatures.get(taskId);
+    }
+
+    /**
+     * Claim a selected task after reviewing its details off-chain.
+     * Falls back to the latest persisted signature if the websocket copy is missing.
+     */
+    async claimAssignedTask(taskId: string): Promise<string> {
+        let assignment = this.assignmentSignatures.get(taskId);
+
+        if (!assignment) {
+            const res = await fetch(`${this.platformUrl}/api/escrow/assignment/${taskId}`, {
+                method: "GET",
+                headers: this.headers(),
+            });
+
+            if (!res.ok) {
+                const errText = await res.text().catch(() => "");
+                throw new Error(`Failed to recover assignment signature: ${res.status} ${errText}`);
+            }
+
+            const body = (await res.json()) as {
+                data?: {
+                    taskId: string;
+                    escrowId: string;
+                    nonce: string;
+                    expiredAt: string;
+                    signature: string;
+                };
+            };
+
+            if (!body.data) {
+                throw new Error("Assignment signature payload missing from platform response");
+            }
+
+            assignment = {
+                taskId: body.data.taskId,
+                escrowId: BigInt(body.data.escrowId),
+                nonce: BigInt(body.data.nonce),
+                expiredAt: BigInt(body.data.expiredAt),
+                signature: body.data.signature as `0x${string}`,
+            };
+            this.assignmentSignatures.set(taskId, assignment);
+        }
+
+        const txHash = await this.client.claimTask({
+            escrowId: assignment.escrowId,
+            nonce: assignment.nonce,
+            expiredAt: assignment.expiredAt,
+            platformSignature: assignment.signature,
+        });
+
+        this.assignmentSignatures.delete(taskId);
+        console.error(`[Agent] Task claimed on-chain: ${txHash} for task ${taskId}`);
         return txHash;
     }
 
@@ -810,13 +864,10 @@ export class AgentPactAgent {
     }
 
     /**
-     * Claim confirmation timeout — when provider doesn't confirm/decline within 2h.
-     * Task returns to Created for re-matching. Only callable by requester or provider.
+     * Legacy helper retained for compatibility with older hosts.
      */
     async claimConfirmationTimeout(escrowId: bigint): Promise<string> {
-        const txHash = await this.client.claimConfirmationTimeout(escrowId);
-        console.error(`[Agent] Confirmation timeout claimed: ${txHash}`);
-        return txHash;
+        return this.client.claimConfirmationTimeout(escrowId);
     }
 
     /**
@@ -854,7 +905,8 @@ export class AgentPactAgent {
 
     /**
      * Fetch full task details including confidential materials.
-     * Only available after claimTask() has been called on-chain.
+     * Available to the requester and selected provider before claim,
+     * and to the claimed provider after the task enters Working.
      */
     async fetchTaskDetails(taskId: string): Promise<TaskDetailsData> {
         const res = await fetch(
@@ -1051,11 +1103,31 @@ export class AgentPactAgent {
     private handleBuiltInEvent(event: string, taskEvent: TaskEvent): void {
         switch (event) {
             case "ASSIGNMENT_SIGNATURE":
+                this.cacheAssignmentSignature(taskEvent);
                 if (this.autoClaimOnSignature) {
                     this.handleAssignmentSignature(taskEvent);
                 }
                 break;
         }
+    }
+
+    private cacheAssignmentSignature(event: TaskEvent): void {
+        const data = event.data;
+        const taskId = String(data.taskId ?? event.taskId ?? "");
+        if (!taskId) {
+            return;
+        }
+
+        const assignment: AssignmentSignatureData = {
+            taskId,
+            escrowId: BigInt(data.escrowId as string | number),
+            nonce: BigInt(data.nonce as string | number),
+            expiredAt: BigInt(data.expiredAt as string | number),
+            signature: data.signature as `0x${string}`,
+        };
+
+        this.assignmentSignatures.set(taskId, assignment);
+        console.error(`[Agent] Assignment signature cached for task ${taskId}`);
     }
 
     /**
@@ -1064,6 +1136,12 @@ export class AgentPactAgent {
      */
     private handleAssignmentSignature(event: TaskEvent): void {
         const data = event.data;
+        const taskId = String(data.taskId ?? event.taskId ?? "");
+
+        if (!taskId) {
+            console.error("[Agent] Missing taskId on ASSIGNMENT_SIGNATURE payload");
+            return;
+        }
 
         const claimParams: ClaimTaskParams = {
             escrowId: BigInt(data.escrowId as string | number),
@@ -1079,6 +1157,7 @@ export class AgentPactAgent {
         this.client
             .claimTask(claimParams)
             .then((txHash: any) => {
+                this.assignmentSignatures.delete(taskId);
                 console.error(`[Agent] claimTask() tx: ${txHash}`);
                 console.error(`[Agent] Task claimed. Waiting for confidential materials (TASK_DETAILS)...`);
 
@@ -1088,7 +1167,7 @@ export class AgentPactAgent {
                     data: {
                         escrowId: claimParams.escrowId,
                         txHash,
-                        taskId: data.taskId,
+                        taskId,
                     },
                 });
             })
@@ -1099,7 +1178,7 @@ export class AgentPactAgent {
                     data: {
                         escrowId: claimParams.escrowId,
                         error: err instanceof Error ? err.message : String(err),
-                        taskId: data.taskId,
+                        taskId,
                     },
                 });
             });

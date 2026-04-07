@@ -22,6 +22,11 @@
   },
   {
     "inputs": [],
+    "name": "DeadlinePassed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "ECDSAInvalidSignature",
     "type": "error"
   },
@@ -70,6 +75,11 @@
   },
   {
     "inputs": [],
+    "name": "FeeTooHigh",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InsufficientDeposit",
     "type": "error"
   },
@@ -80,7 +90,17 @@
   },
   {
     "inputs": [],
-    "name": "InvalidDeadline",
+    "name": "InvalidCriteriaCount",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidDuration",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidFundWeight",
     "type": "error"
   },
   {
@@ -189,6 +209,11 @@
   },
   {
     "inputs": [],
+    "name": "TaskSuspended",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "TokenNotAllowed",
     "type": "error"
   },
@@ -206,6 +231,16 @@
       }
     ],
     "name": "UUPSUnsupportedProxiableUUID",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "WeightCountMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "WeightsSumNot100",
     "type": "error"
   },
   {
@@ -322,7 +357,7 @@
       {
         "indexed": false,
         "internalType": "uint64",
-        "name": "deliveryDeadline",
+        "name": "deliveryDurationSeconds",
         "type": "uint64"
       },
       {
@@ -335,6 +370,12 @@
         "indexed": false,
         "internalType": "uint8",
         "name": "acceptanceWindowHours",
+        "type": "uint8"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "criteriaCount",
         "type": "uint8"
       }
     ],
@@ -377,19 +418,19 @@
     "anonymous": false,
     "inputs": [
       {
-        "indexed": true,
+        "indexed": false,
         "internalType": "uint256",
-        "name": "escrowId",
+        "name": "oldFeeBps",
         "type": "uint256"
       },
       {
         "indexed": false,
-        "internalType": "uint8",
-        "name": "passRate",
-        "type": "uint8"
+        "internalType": "uint256",
+        "name": "newFeeBps",
+        "type": "uint256"
       }
     ],
-    "name": "PassRateSubmitted",
+    "name": "PlatformFeeUpdated",
     "type": "event"
   },
   {
@@ -424,9 +465,34 @@
         "internalType": "uint256",
         "name": "depositPenalty",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "passRate",
+        "type": "uint8"
       }
     ],
     "name": "RevisionRequested",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "escrowId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "provider",
+        "type": "address"
+      }
+    ],
+    "name": "TaskAbandoned",
     "type": "event"
   },
   {
@@ -474,6 +540,12 @@
         "internalType": "uint256",
         "name": "escrowId",
         "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "compensation",
+        "type": "uint256"
       }
     ],
     "name": "TaskCancelled",
@@ -497,7 +569,7 @@
       {
         "indexed": false,
         "internalType": "uint64",
-        "name": "confirmationDeadline",
+        "name": "deliveryDeadline",
         "type": "uint64"
       }
     ],
@@ -514,32 +586,13 @@
         "type": "uint256"
       },
       {
-        "indexed": true,
-        "internalType": "address",
-        "name": "provider",
-        "type": "address"
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "declineCount",
+        "type": "uint8"
       }
     ],
-    "name": "TaskConfirmed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "escrowId",
-        "type": "uint256"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "provider",
-        "type": "address"
-      }
-    ],
-    "name": "TaskDeclined",
+    "name": "TaskSuspendedAfterDeclines",
     "type": "event"
   },
   {
@@ -595,12 +648,38 @@
   },
   {
     "inputs": [],
-    "name": "CONFIRMATION_WINDOW",
+    "name": "DEFAULT_PENALTY_PLATFORM_BPS",
     "outputs": [
       {
-        "internalType": "uint64",
+        "internalType": "uint16",
         "name": "",
-        "type": "uint64"
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "DEFAULT_PLATFORM_FEE_BPS",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MAX_PLATFORM_FEE_BPS",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
       }
     ],
     "stateMutability": "view",
@@ -621,19 +700,6 @@
   },
   {
     "inputs": [],
-    "name": "PLATFORM_FEE_BPS",
-    "outputs": [
-      {
-        "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [],
     "name": "UPGRADE_INTERFACE_VERSION",
     "outputs": [
       {
@@ -643,6 +709,19 @@
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "escrowId",
+        "type": "uint256"
+      }
+    ],
+    "name": "abandonTask",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -700,25 +779,6 @@
     "inputs": [
       {
         "internalType": "uint256",
-        "name": "",
-        "type": "uint256"
-      }
-    ],
-    "name": "calculatedPassRates",
-    "outputs": [
-      {
-        "internalType": "uint8",
-        "name": "",
-        "type": "uint8"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
         "name": "escrowId",
         "type": "uint256"
       }
@@ -737,19 +797,6 @@
       }
     ],
     "name": "claimAcceptanceTimeout",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "escrowId",
-        "type": "uint256"
-      }
-    ],
-    "name": "claimConfirmationTimeout",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -798,26 +845,13 @@
   {
     "inputs": [
       {
-        "internalType": "uint256",
-        "name": "escrowId",
-        "type": "uint256"
-      }
-    ],
-    "name": "confirmTask",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "bytes32",
         "name": "taskHash",
         "type": "bytes32"
       },
       {
         "internalType": "uint64",
-        "name": "deliveryDeadline",
+        "name": "deliveryDurationSeconds",
         "type": "uint64"
       },
       {
@@ -829,6 +863,16 @@
         "internalType": "uint8",
         "name": "acceptanceWindowHours",
         "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "criteriaCount",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8[]",
+        "name": "fundWeights",
+        "type": "uint8[]"
       },
       {
         "internalType": "address",
@@ -850,19 +894,6 @@
       }
     ],
     "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "escrowId",
-        "type": "uint256"
-      }
-    ],
-    "name": "declineTask",
-    "outputs": [],
-    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -903,6 +934,30 @@
         "internalType": "uint256[]",
         "name": "extensions",
         "type": "uint256[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "name": "escrowFundWeights",
+    "outputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -970,17 +1025,17 @@
       },
       {
         "internalType": "uint64",
+        "name": "deliveryDurationSeconds",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
         "name": "deliveryDeadline",
         "type": "uint64"
       },
       {
         "internalType": "uint64",
         "name": "acceptanceDeadline",
-        "type": "uint64"
-      },
-      {
-        "internalType": "uint64",
-        "name": "confirmationDeadline",
         "type": "uint64"
       },
       {
@@ -991,6 +1046,16 @@
       {
         "internalType": "uint8",
         "name": "currentRevision",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "criteriaCount",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "declineCount",
         "type": "uint8"
       },
       {
@@ -1079,17 +1144,17 @@
           },
           {
             "internalType": "uint64",
+            "name": "deliveryDurationSeconds",
+            "type": "uint64"
+          },
+          {
+            "internalType": "uint64",
             "name": "deliveryDeadline",
             "type": "uint64"
           },
           {
             "internalType": "uint64",
             "name": "acceptanceDeadline",
-            "type": "uint64"
-          },
-          {
-            "internalType": "uint64",
-            "name": "confirmationDeadline",
             "type": "uint64"
           },
           {
@@ -1104,6 +1169,16 @@
           },
           {
             "internalType": "uint8",
+            "name": "criteriaCount",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
+            "name": "declineCount",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
             "name": "acceptanceWindowHours",
             "type": "uint8"
           }
@@ -1111,6 +1186,49 @@
         "internalType": "struct IAgentPactEscrow.EscrowRecord",
         "name": "",
         "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "escrowId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint8",
+        "name": "criteriaIndex",
+        "type": "uint8"
+      }
+    ],
+    "name": "getFundWeight",
+    "outputs": [
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "escrowId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getFundWeights",
+    "outputs": [
+      {
+        "internalType": "uint8[]",
+        "name": "",
+        "type": "uint8[]"
       }
     ],
     "stateMutability": "view",
@@ -1167,6 +1285,32 @@
   },
   {
     "inputs": [],
+    "name": "penaltyPlatformBps",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "platformFeeBps",
+    "outputs": [
+      {
+        "internalType": "uint16",
+        "name": "",
+        "type": "uint16"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "platformFund",
     "outputs": [
       {
@@ -1212,6 +1356,19 @@
     "type": "function"
   },
   {
+    "inputs": [],
+    "name": "reputationRegistry",
+    "outputs": [
+      {
+        "internalType": "contract IAgentPactReputationRegistry",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1224,9 +1381,9 @@
         "type": "bytes32"
       },
       {
-        "internalType": "bytes32",
-        "name": "criteriaResultsHash",
-        "type": "bytes32"
+        "internalType": "bool[]",
+        "name": "criteriaResults",
+        "type": "bool[]"
       }
     ],
     "name": "requestRevision",
@@ -1248,6 +1405,32 @@
       }
     ],
     "name": "setAllowedToken",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "_bps",
+        "type": "uint16"
+      }
+    ],
+    "name": "setPenaltyPlatformBps",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint16",
+        "name": "newFeeBps",
+        "type": "uint16"
+      }
+    ],
+    "name": "setPlatformFeeBps",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1281,6 +1464,19 @@
   {
     "inputs": [
       {
+        "internalType": "address",
+        "name": "_treasury",
+        "type": "address"
+      }
+    ],
+    "name": "setTreasury",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "escrowId",
         "type": "uint256"
@@ -1297,21 +1493,67 @@
     "type": "function"
   },
   {
-    "inputs": [
+    "inputs": [],
+    "name": "totalClosedEscrows",
+    "outputs": [
       {
         "internalType": "uint256",
-        "name": "escrowId",
+        "name": "",
         "type": "uint256"
-      },
-      {
-        "internalType": "uint8",
-        "name": "passRate",
-        "type": "uint8"
       }
     ],
-    "name": "submitPassRate",
-    "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "totalPayoutVolumeByToken",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "totalRewardVolumeByToken",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "totalSuccessfulEscrows",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1325,6 +1567,19 @@
     "name": "transferOwnership",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "treasuryContract",
+    "outputs": [
+      {
+        "internalType": "contract IAgentPactTreasury",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {

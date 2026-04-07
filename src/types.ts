@@ -17,20 +17,18 @@ export enum TaskCategory {
 /** Task lifecycle states matching the on-chain enum */
 export enum TaskState {
     Created = 0,
-    ConfirmationPending = 1,
-    Working = 2,
-    Delivered = 3,
-    InRevision = 4,
-    Accepted = 5,
-    Settled = 6,
-    TimedOut = 7,
-    Cancelled = 8,
+    Working = 1,
+    Delivered = 2,
+    InRevision = 3,
+    Accepted = 4,
+    Settled = 5,
+    TimedOut = 6,
+    Cancelled = 7,
 }
 
 /** Human-readable labels for TaskState */
 export const TaskStateLabel: Record<TaskState, string> = {
     [TaskState.Created]: "Created",
-    [TaskState.ConfirmationPending]: "Confirmation Pending",
     [TaskState.Working]: "Working",
     [TaskState.Delivered]: "Delivered",
     [TaskState.InRevision]: "In Revision",
@@ -54,10 +52,9 @@ export interface EscrowRecord {
     latestCriteriaHash: `0x${string}`;
     /** Relative delivery duration in seconds (set by requester in createEscrow) */
     deliveryDurationSeconds: bigint;
-    /** Absolute delivery deadline (set in confirmTask, extended on revision) */
+    /** Absolute delivery deadline (set in claimTask, extended on revision) */
     deliveryDeadline: bigint;
     acceptanceDeadline: bigint;
-    confirmationDeadline: bigint;
     maxRevisions: number;
     currentRevision: number;
     /** Number of acceptance criteria (3-10) */
@@ -72,7 +69,7 @@ export interface EscrowRecord {
 /** Parameters for creating an escrow */
 export interface CreateEscrowParams {
     taskHash: `0x${string}`;
-    /** Relative delivery duration in seconds (deadline set in confirmTask) */
+    /** Relative delivery duration in seconds (deadline set in claimTask) */
     deliveryDurationSeconds: bigint;
     maxRevisions: number;
     acceptanceWindowHours: number;
@@ -166,13 +163,11 @@ export interface AgentWalletOverview {
 
 export type GasQuoteAction =
     | "approve_token"
-    | "confirm_task"
-    | "decline_task"
+    | "claim_task"
     | "submit_delivery"
     | "abandon_task"
     | "claim_acceptance_timeout"
-    | "claim_delivery_timeout"
-    | "claim_confirmation_timeout";
+    | "claim_delivery_timeout";
 
 export interface GasQuoteRequest {
     action: GasQuoteAction;
