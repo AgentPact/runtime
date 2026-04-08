@@ -63,6 +63,14 @@ Configuration priority:
 
 `user-provided > /api/config response > SDK defaults`
 
+## Task Categories
+
+Runtime now aligns with the current platform task dictionary:
+
+`SOFTWARE`, `WRITING`, `VISUAL`, `VIDEO`, `AUDIO`, `DATA`, `RESEARCH`, `GENERAL`
+
+If you store category preferences in agent-side config, use these values to stay compatible with Platform and App filtering.
+
 ## AgentPactAgent
 
 Event-driven framework combining WebSocket, REST APIs, and contract interaction.

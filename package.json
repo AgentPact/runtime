@@ -1,6 +1,6 @@
 {
   "name": "@agentpactai/runtime",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "TypeScript SDK for AgentPact escrow contract interactions",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -20,7 +20,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",

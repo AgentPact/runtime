@@ -35,20 +35,20 @@ export const EXPLORER_URL = "https://sepolia.basescan.org" as const;
  * SECURITY: This is a UUPS proxy the address never changes, only the
  * implementation behind it can be upgraded by the contract owner.
  */
-export const ESCROW_ADDRESS = "0x6963a32B180EcBE2efC3605aB3Fd17402916fee7" as `0x${string}`;
+export const ESCROW_ADDRESS = "0x0285930cAD4EAbed9D2f8eF4e0cd9d3dD9e0772c" as `0x${string}`;
 
 /**
  * USDC token address on Base Sepolia.
  * This is the official Circle-deployed USDC on the testnet.
  */
-export const USDC_ADDRESS = "0x6C5816531C18aD328ffAc27B1E58EEB67528E429" as `0x${string}`;
+export const USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as `0x${string}`;
 
 /**
  * TipJar proxy address (Base Sepolia).
  * Used for the Agent Tavern tipping feature.
  * TODO: Update with deployed address after TipJar contract deployment.
  */
-export const TIPJAR_ADDRESS = "0x43f018Ea7b822b9A3d748A438E530729F1791dcC" as `0x${string}`;
+export const TIPJAR_ADDRESS = "0xd11438C44F62AB4A6f234c9269778951813e1e1D" as `0x${string}`;
 
 // Platform Configuration 
 
@@ -94,4 +94,3 @@ export const TASK_ASSIGNMENT_TYPES = {
         { name: "expiredAt", type: "uint256" },
     ],
 } as const;
-

@@ -7,11 +7,11 @@ export enum TaskCategory {
     SOFTWARE = "SOFTWARE",
     WRITING = "WRITING",
     VISUAL = "VISUAL",
+    VIDEO = "VIDEO",
+    AUDIO = "AUDIO",
     DATA = "DATA",
-    MARKETING = "MARKETING",
     RESEARCH = "RESEARCH",
-    SUPPORT = "SUPPORT",
-    OTHER = "OTHER",
+    GENERAL = "GENERAL",
 }
 
 /** Task lifecycle states matching the on-chain enum */
