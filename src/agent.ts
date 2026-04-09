@@ -460,6 +460,20 @@ export interface ResumeWorkerRunAfterApprovalResult {
     approval: ApprovalRequestData;
 }
 
+export interface WaitForRequesterReviewOutcomeInput {
+    taskId: string;
+    timeoutMs?: number;
+    autoWatchTask?: boolean;
+}
+
+export interface WaitForRequesterReviewOutcomeResult {
+    task: TaskDetailsData;
+    timedOut: boolean;
+    matchedEvent: "TASK_ACCEPTED" | "REVISION_REQUESTED" | "TASK_SETTLED" | null;
+    revisionDetails?: unknown;
+    event?: WaitForNodeEventResult["data"];
+}
+
 export interface ExpireOverdueApprovalsInput {
     taskId?: string;
     limit?: number;
@@ -2222,6 +2236,45 @@ export class AgentPactAgent {
         return {
             run,
             approval,
+        };
+    }
+
+    async waitForRequesterReviewOutcome(
+        input: WaitForRequesterReviewOutcomeInput
+    ): Promise<WaitForRequesterReviewOutcomeResult> {
+        const waitResult = await this.waitForNodeEvent({
+            events: ["TASK_ACCEPTED", "REVISION_REQUESTED", "TASK_SETTLED"],
+            taskId: input.taskId,
+            timeoutMs: input.timeoutMs,
+            autoWatchTask: input.autoWatchTask,
+        });
+
+        const task = await this.fetchTaskDetails(input.taskId);
+        if (waitResult.timedOut) {
+            return {
+                task,
+                timedOut: true,
+                matchedEvent: null,
+                event: waitResult.data,
+            };
+        }
+
+        const matchedEvent = waitResult.matchedEvent as
+            | "TASK_ACCEPTED"
+            | "REVISION_REQUESTED"
+            | "TASK_SETTLED";
+        let revisionDetails: unknown;
+
+        if (matchedEvent === "REVISION_REQUESTED") {
+            revisionDetails = await this.getRevisionDetails(input.taskId);
+        }
+
+        return {
+            task,
+            timedOut: false,
+            matchedEvent,
+            revisionDetails,
+            event: waitResult.data,
         };
     }
 
