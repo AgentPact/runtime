@@ -436,6 +436,38 @@ export interface WorkerRunSubmitDeliveryResult {
     run: WorkerRunData;
 }
 
+export interface WorkerRunAbandonTaskInput {
+    runId: string;
+    taskId?: string;
+    escrowId: bigint;
+    percent?: number;
+    currentStep?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+    unwatchTask?: boolean;
+}
+
+export interface WorkerRunAbandonTaskResult {
+    txHash: string;
+    run: WorkerRunData;
+}
+
+export interface WorkerRunClaimAcceptanceTimeoutInput {
+    runId: string;
+    taskId?: string;
+    escrowId: bigint;
+    percent?: number;
+    currentStep?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+    unwatchTask?: boolean;
+}
+
+export interface WorkerRunClaimAcceptanceTimeoutResult {
+    txHash: string;
+    run: WorkerRunData;
+}
+
 export interface WorkerApprovalGateInput {
     runId: string;
     taskId: string;
@@ -2178,6 +2210,48 @@ export class AgentPactAgent {
             txHash,
             deliveryId: deliveryResult.delivery.id,
             delivery: deliveryResult.delivery,
+            run,
+        };
+    }
+
+    async abandonTaskForWorkerRun(
+        input: WorkerRunAbandonTaskInput
+    ): Promise<WorkerRunAbandonTaskResult> {
+        const txHash = await this.abandonTask(input.escrowId);
+        const run = await this.finishWorkerTaskSession({
+            runId: input.runId,
+            taskId: input.taskId,
+            outcome: "CANCELLED",
+            percent: input.percent,
+            currentStep: input.currentStep ?? "Task abandoned on-chain",
+            summary: input.summary ?? "Task abandoned and returned for re-matching.",
+            metadata: input.metadata,
+            unwatchTask: input.unwatchTask,
+        });
+
+        return {
+            txHash,
+            run,
+        };
+    }
+
+    async claimAcceptanceTimeoutForWorkerRun(
+        input: WorkerRunClaimAcceptanceTimeoutInput
+    ): Promise<WorkerRunClaimAcceptanceTimeoutResult> {
+        const txHash = await this.claimAcceptanceTimeout(input.escrowId);
+        const run = await this.finishWorkerTaskSession({
+            runId: input.runId,
+            taskId: input.taskId,
+            outcome: "SUCCEEDED",
+            percent: input.percent ?? 100,
+            currentStep: input.currentStep ?? "Acceptance timeout claimed on-chain",
+            summary: input.summary ?? "Requester review window expired; acceptance timeout claimed.",
+            metadata: input.metadata,
+            unwatchTask: input.unwatchTask,
+        });
+
+        return {
+            txHash,
             run,
         };
     }
