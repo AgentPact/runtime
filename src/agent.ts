@@ -360,6 +360,14 @@ export interface WorkerTaskSessionStartResult {
     brief: WorkerTaskExecutionBrief;
 }
 
+export interface WorkerTaskSessionResumeInput extends WorkerTaskSessionStartInput {
+    createIfMissing?: boolean;
+}
+
+export interface WorkerTaskSessionResumeResult extends WorkerTaskSessionStartResult {
+    reusedExistingRun: boolean;
+}
+
 export interface WorkerTaskExecutionBrief {
     task: TaskDetailsData;
     node: AgentNodeData;
@@ -431,6 +439,10 @@ export interface WaitForNodeEventResult {
     runId?: string;
     approvalId?: string;
     data?: Record<string, unknown>;
+}
+
+function isActiveWorkerRunStatus(status: WorkerRunStatus | string | undefined) {
+    return status === "QUEUED" || status === "STARTING" || status === "RUNNING" || status === "WAITING_APPROVAL";
 }
 
 export interface ApprovalRequestData {
@@ -1764,6 +1776,61 @@ export class AgentPactAgent {
             run,
             task,
             brief,
+        };
+    }
+
+    async resumeWorkerTaskSession(
+        input: WorkerTaskSessionResumeInput
+    ): Promise<WorkerTaskSessionResumeResult> {
+        const [node, task, runs] = await Promise.all([
+            this.ensureNode(input.ensureNode),
+            this.fetchTaskDetails(input.taskId),
+            this.getNodeWorkerRuns({ taskId: input.taskId, limit: 50, offset: 0 }),
+        ]);
+
+        this.watchTask(input.taskId);
+
+        const existingRun = runs
+            .filter((run) => run.workerKey === input.workerKey)
+            .filter((run) => run.hostKind === input.hostKind)
+            .filter((run) => isActiveWorkerRunStatus(run.status))
+            .sort((a, b) => {
+                const aTime = new Date(String(a.lastHeartbeatAt ?? a.updatedAt ?? a.createdAt ?? 0)).getTime();
+                const bTime = new Date(String(b.lastHeartbeatAt ?? b.updatedAt ?? b.createdAt ?? 0)).getTime();
+                return bTime - aTime;
+            })[0];
+
+        if (!existingRun) {
+            if (!input.createIfMissing) {
+                throw new Error(
+                    `No active worker session found for task ${input.taskId} and workerKey ${input.workerKey}`
+                );
+            }
+
+            const started = await this.startWorkerTaskSession(input);
+            return {
+                ...started,
+                reusedExistingRun: false,
+            };
+        }
+
+        const run = await this.heartbeatWorkerRun(existingRun.id, {
+            percent: existingRun.percent,
+            currentStep: input.currentStep ?? existingRun.currentStep ?? "Worker session resumed",
+            summary: input.summary ?? existingRun.summary ?? `Execution session resumed for ${task.title ?? input.taskId}`,
+            metadata: input.metadata,
+        });
+
+        const brief = await this.getWorkerTaskExecutionBrief({
+            taskId: input.taskId,
+        });
+
+        return {
+            node,
+            run,
+            task,
+            brief,
+            reusedExistingRun: true,
         };
     }
 

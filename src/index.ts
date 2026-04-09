@@ -117,6 +117,8 @@ export {
     type ResolveStaleWorkerRunsResult,
     type WorkerTaskSessionStartInput,
     type WorkerTaskSessionStartResult,
+    type WorkerTaskSessionResumeInput,
+    type WorkerTaskSessionResumeResult,
     type WorkerTaskExecutionBrief,
     type WorkerTaskExecutionBriefOptions,
     type WorkerTaskSessionFinishInput,
