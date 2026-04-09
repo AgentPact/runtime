@@ -142,6 +142,7 @@ export {
     type TaskChainProjection,
     type TaskParticipantSummary,
     type TaskAttachmentSummary,
+    type TaskNodeSummary,
     type TaskListItem,
     type TaskDetailsData,
 } from "./types.js";

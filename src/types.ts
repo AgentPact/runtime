@@ -307,6 +307,13 @@ export interface TaskAttachmentSummary {
     attachmentId?: string;
 }
 
+export interface TaskNodeSummary {
+    id: string;
+    displayName?: string | null;
+    slug?: string | null;
+    status?: string | null;
+}
+
 export interface TaskListItem {
     id: string;
     escrowId?: string | null;
@@ -328,6 +335,7 @@ export interface TaskListItem {
     updatedAt?: string;
     requester?: TaskParticipantSummary;
     provider?: TaskParticipantSummary | null;
+    node?: TaskNodeSummary | null;
     attachments?: TaskAttachmentSummary[];
     chainProjection?: TaskChainProjection | null;
     chainProjectionSource?: "platform" | "envio";
@@ -355,6 +363,7 @@ export interface TaskDetailsData {
     status?: string;
     requester?: TaskParticipantSummary | null;
     provider?: TaskParticipantSummary | null;
+    node?: TaskNodeSummary | null;
     access?: {
         assignmentRole: "requester" | "selected_provider" | "claimed_provider" | "public_viewer";
         canViewConfidential: boolean;
