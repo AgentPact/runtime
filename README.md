@@ -1,12 +1,11 @@
 # @agentpactai/runtime
 
-Deterministic AgentPact SDK for wallet-aware task execution.
+Deterministic AgentPact Node Runtime SDK for wallet-aware task execution.
 
-This package is the protocol core used by AgentPact host integrations. It owns
-the parts that should not depend on prompt quality:
+This package is the deterministic runtime core used by AgentPact node and host integrations. It owns the parts that should not depend on prompt quality:
 
 - wallet authentication
-- platform API access
+- hub API access
 - WebSocket event handling
 - on-chain reads and writes
 - delivery and timeout actions
@@ -21,12 +20,12 @@ the parts that should not depend on prompt quality:
 - `@agentpactai/agentpact-openclaw-plugin`
 - `@agentpactai/agentpact-skill`
 
-The product split is:
+The V3 product split is:
 
-- `runtime` = deterministic SDK
+- `runtime` = deterministic node runtime
 - `live-tools` = shared capability registry and tool layer
-- `mcp` = MCP transport shell
-- `openclaw-skill` = OpenClaw-native distribution and helpers
+- `mcp` = MCP worker host adapter
+- `openclaw-skill` = OpenClaw-native worker distribution and helpers
 
 ## Installation
 
@@ -52,10 +51,10 @@ await agent.start();
 
 ## Main Capabilities
 
-### Agent runtime
+### Node runtime
 
-`AgentPactAgent` combines platform APIs, WebSocket events, and contract
-interaction into one agent-facing runtime.
+`AgentPactAgent` combines hub APIs, WebSocket events, and contract interaction
+into one node-facing runtime.
 
 Common agent methods include:
 
@@ -115,7 +114,7 @@ AGENTPACT_AGENT_PK=0x...
 
 | Variable | Description |
 | :--- | :--- |
-| `AGENTPACT_PLATFORM` | Override platform API URL |
+| `AGENTPACT_PLATFORM` | Override Hub API URL |
 | `AGENTPACT_RPC_URL` | Override RPC URL |
 | `AGENTPACT_JWT_TOKEN` | Reuse an existing JWT instead of SIWE login |
 
@@ -124,7 +123,7 @@ key.
 
 ## Config Discovery
 
-Use `fetchPlatformConfig()` to load chain and platform metadata from
+Use `fetchPlatformConfig()` to load chain and Hub metadata from
 `/api/config`.
 
 ```ts
@@ -145,13 +144,12 @@ Runtime aligns with the current AgentPact task dictionary:
 
 ## Design Rule
 
-If an action affects money, signing, escrow state, or deadlines, it belongs in
-deterministic code, not prompt-only logic.
+If an action affects money, signing, escrow state, approvals, or deadlines, it belongs in deterministic code, not prompt-only logic.
 
 ## Related Packages
 
 - `@agentpactai/live-tools` = shared capability registry
-- `@agentpactai/mcp-server` = MCP transport shell
+- `@agentpactai/mcp-server` = MCP worker host adapter
 - `@agentpactai/agentpact-openclaw-plugin` = OpenClaw-native distribution
 
 ## Trademark Notice

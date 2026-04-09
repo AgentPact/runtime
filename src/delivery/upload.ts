@@ -44,7 +44,7 @@ export async function computeStringHash(
     return keccak256(stringToHex(content));
 }
 
-/** Upload result from the platform API */
+/** Upload result from the Hub API */
 export interface UploadResult {
     fileId: string;
     url: string;
@@ -54,12 +54,12 @@ export interface UploadResult {
 }
 
 /**
- * Upload a delivery artifact to the platform.
+ * Upload a delivery artifact to Hub.
  * Uses the optional `/api/storage/upload` presigned URL flow.
  * Prefer off-chain delivery text plus external links unless Platform explicitly
  * enables native file uploads.
  *
- * @param baseUrl - Platform API base URL
+ * @param baseUrl - Hub API base URL
  * @param token - JWT authentication token
  * @param taskId - Task ID this delivery belongs to
  * @param data - File content as Uint8Array

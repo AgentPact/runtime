@@ -876,8 +876,8 @@ export class AgentPactAgent {
     }
 
     /**
-     * Report execution progress to the platform.
-     * This is a platform API call (not on-chain) for visibility.
+     * Report execution progress to Hub.
+     * This is a Hub API call (not on-chain) for visibility.
      *
      * @param taskId - Task ID
      * @param percent - Progress percentage (0-100)

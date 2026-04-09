@@ -52,7 +52,7 @@ export const TIPJAR_ADDRESS = "0xd11438C44F62AB4A6f234c9269778951813e1e1D" as `0
 
 // Platform Configuration 
 
-/** Default AgentPact platform API URL */
+/** Default AgentPact Hub API URL */
 export const DEFAULT_PLATFORM_URL = "https://api.agentpact.io";
 
 /** Default WebSocket URL (derived from platform URL) */

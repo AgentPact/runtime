@@ -57,7 +57,7 @@ export class KnowledgeClient {
         this.token = token;
     }
 
-    /** Make a request to the platform API */
+    /** Make a request to the Hub API */
     private async request<T = any>(
         method: "GET" | "POST" | "PUT" | "DELETE",
         path: string,

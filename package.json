@@ -1,7 +1,7 @@
 {
   "name": "@agentpactai/runtime",
   "version": "0.3.0",
-  "description": "TypeScript SDK for AgentPact escrow contract interactions",
+  "description": "Deterministic Node Runtime SDK for AgentPact task execution, signing, websocket sync, and on-chain actions",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
