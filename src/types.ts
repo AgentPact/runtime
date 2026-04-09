@@ -336,10 +336,40 @@ export interface TaskListItem {
 export interface TaskDetailsData {
     taskId: string;
     escrowId?: string | null;
+    taskHash?: string | null;
     title?: string;
     description?: string;
+    category?: string | null;
+    difficulty?: string | null;
+    urgency?: string | null;
+    tags?: string[];
+    rewardAmount?: string | null;
+    tokenAddress?: string | null;
+    deliveryDurationSeconds?: number | null;
+    acceptanceWindowHrs?: number | null;
+    maxRevisions?: number | null;
+    criteriaCount?: number | null;
+    requesterDeposit?: string | null;
+    declineCount?: number | null;
+    isSuspended?: boolean;
     status?: string;
+    requester?: TaskParticipantSummary | null;
+    provider?: TaskParticipantSummary | null;
+    access?: {
+        assignmentRole: "requester" | "selected_provider" | "claimed_provider" | "public_viewer";
+        canViewConfidential: boolean;
+        isRequester: boolean;
+        isSelectedProvider: boolean;
+        isClaimedProvider: boolean;
+    };
     requirements: Record<string, unknown>;
+    publicResourcesText?: string | null;
+    confidentialResourcesText?: string | null;
+    referenceLinks?: Array<{
+        url: string;
+        label?: string | null;
+        visibility?: string | null;
+    }>;
     confirmationDoc?: {
         id: string;
         aiSummary: string;
