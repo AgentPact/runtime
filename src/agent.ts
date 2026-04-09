@@ -368,6 +368,21 @@ export interface WorkerTaskSessionResumeResult extends WorkerTaskSessionStartRes
     reusedExistingRun: boolean;
 }
 
+export interface WorkerRunClaimTaskInput {
+    runId: string;
+    taskId: string;
+    percent?: number;
+    currentStep?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+}
+
+export interface WorkerRunClaimTaskResult {
+    txHash: string;
+    run: WorkerRunData;
+    task: TaskDetailsData;
+}
+
 export interface WorkerTaskExecutionBrief {
     task: TaskDetailsData;
     node: AgentNodeData;
@@ -395,6 +410,30 @@ export interface WorkerTaskSessionFinishInput {
     summary?: string;
     metadata?: Record<string, unknown>;
     unwatchTask?: boolean;
+}
+
+export interface WorkerRunSubmitDeliveryInput {
+    runId: string;
+    taskId: string;
+    escrowId: bigint;
+    deliveryHash: string;
+    content?: string;
+    artifacts?: unknown;
+    selfTestResults?: unknown;
+    revisionChanges?: unknown;
+    aiValidationResult?: string;
+    isPass?: boolean;
+    percent?: number;
+    currentStep?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+}
+
+export interface WorkerRunSubmitDeliveryResult {
+    txHash: string;
+    deliveryId: string;
+    delivery: unknown;
+    run: WorkerRunData;
 }
 
 export interface WorkerApprovalGateInput {
@@ -1966,6 +2005,30 @@ export class AgentPactAgent {
         };
     }
 
+    async claimTaskForWorkerRun(
+        input: WorkerRunClaimTaskInput
+    ): Promise<WorkerRunClaimTaskResult> {
+        this.watchTask(input.taskId);
+
+        const txHash = await this.claimAssignedTask(input.taskId);
+        const [run, task] = await Promise.all([
+            this.updateWorkerRun(input.runId, {
+                status: "RUNNING",
+                percent: input.percent,
+                currentStep: input.currentStep ?? "Task claimed on-chain, protected execution unlocked",
+                summary: input.summary ?? "Task claimed successfully and worker execution may continue.",
+                metadata: input.metadata,
+            }),
+            this.fetchTaskDetails(input.taskId),
+        ]);
+
+        return {
+            txHash,
+            run,
+            task,
+        };
+    }
+
     async getWorkerTaskExecutionBrief(
         options: WorkerTaskExecutionBriefOptions
     ): Promise<WorkerTaskExecutionBrief> {
@@ -2085,6 +2148,38 @@ export class AgentPactAgent {
         }
 
         return run;
+    }
+
+    async submitDeliveryForWorkerRun(
+        input: WorkerRunSubmitDeliveryInput
+    ): Promise<WorkerRunSubmitDeliveryResult> {
+        const deliveryResult = await this.createTaskDelivery(input.taskId, {
+            deliveryHash: input.deliveryHash,
+            content: input.content ?? "Delivery submitted by worker session.",
+            artifacts: input.artifacts,
+            selfTestResults: input.selfTestResults,
+            revisionChanges: input.revisionChanges,
+            aiValidationResult: input.aiValidationResult,
+            isPass: input.isPass,
+        });
+
+        const txHash = await this.submitDelivery(input.escrowId, input.deliveryHash);
+        await this.attachDeliveryTxHash(input.taskId, deliveryResult.delivery.id, txHash);
+
+        const run = await this.updateWorkerRun(input.runId, {
+            status: "RUNNING",
+            percent: input.percent ?? 100,
+            currentStep: input.currentStep ?? "Delivery submitted, waiting for requester review",
+            summary: input.summary ?? "Delivery submitted successfully and is now under requester review.",
+            metadata: input.metadata,
+        });
+
+        return {
+            txHash,
+            deliveryId: deliveryResult.delivery.id,
+            delivery: deliveryResult.delivery,
+            run,
+        };
     }
 
     async gateWorkerRunForApproval(
