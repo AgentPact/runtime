@@ -68,6 +68,7 @@ import { AgentPactWebSocket, type WebSocketOptions } from "./transport/websocket
 import { AgentPactClient } from "./client.js";
 import {
     TaskChatClient,
+    type ChatMessage,
     type MessageType,
     type TaskClarification,
 } from "./chat/taskChat.js";
@@ -318,6 +319,54 @@ export interface WorkerRunData {
         title?: string | null;
         status?: string | null;
     } | null;
+}
+
+export interface WorkerTaskSessionStartInput {
+    taskId: string;
+    hostKind: WorkerHostKind;
+    workerKey: string;
+    displayName?: string;
+    model?: string;
+    currentStep?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+    ensureNode?: Partial<AgentNodeRegistrationData>;
+}
+
+export interface WorkerTaskSessionStartResult {
+    node: AgentNodeData;
+    run: WorkerRunData;
+    task: TaskDetailsData;
+    brief: WorkerTaskExecutionBrief;
+}
+
+export interface WorkerTaskExecutionBrief {
+    task: TaskDetailsData;
+    node: AgentNodeData;
+    workerRuns: WorkerRunData[];
+    pendingApprovals: ApprovalRequestData[];
+    clarifications: TaskClarification[];
+    unreadChatCount: number;
+    recentMessages: ChatMessage[];
+    suggestedNextActions: string[];
+}
+
+export interface WorkerTaskExecutionBriefOptions {
+    taskId: string;
+    messagesLimit?: number;
+    workerRunsLimit?: number;
+    approvalsLimit?: number;
+}
+
+export interface WorkerTaskSessionFinishInput {
+    runId: string;
+    taskId?: string;
+    outcome: Extract<WorkerRunStatus, "SUCCEEDED" | "FAILED" | "CANCELLED">;
+    percent?: number;
+    currentStep?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+    unwatchTask?: boolean;
 }
 
 export interface ApprovalRequestCreateInput {
@@ -1557,6 +1606,98 @@ export class AgentPactAgent {
         return body.run;
     }
 
+    async startWorkerTaskSession(input: WorkerTaskSessionStartInput): Promise<WorkerTaskSessionStartResult> {
+        const [node, task] = await Promise.all([
+            this.ensureNode(input.ensureNode),
+            this.fetchTaskDetails(input.taskId),
+        ]);
+
+        this.watchTask(input.taskId);
+
+        const run = await this.createWorkerRun({
+            taskId: input.taskId,
+            hostKind: input.hostKind,
+            workerKey: input.workerKey,
+            displayName: input.displayName,
+            model: input.model,
+            status: "RUNNING",
+            percent: 0,
+            currentStep: input.currentStep ?? "Task context loaded",
+            summary: input.summary ?? `Execution session started for ${task.title ?? input.taskId}`,
+            metadata: input.metadata,
+        });
+
+        const brief = await this.getWorkerTaskExecutionBrief({
+            taskId: input.taskId,
+        });
+
+        return {
+            node,
+            run,
+            task,
+            brief,
+        };
+    }
+
+    async getWorkerTaskExecutionBrief(
+        options: WorkerTaskExecutionBriefOptions
+    ): Promise<WorkerTaskExecutionBrief> {
+        const taskId = options.taskId;
+        const messagesLimit = options.messagesLimit ?? 20;
+        const workerRunsLimit = options.workerRunsLimit ?? 10;
+        const approvalsLimit = options.approvalsLimit ?? 20;
+
+        const [node, task, workerRuns, pendingApprovals, clarifications, unreadChatCount, recentMessages] =
+            await Promise.all([
+                this.getMyNode(),
+                this.fetchTaskDetails(taskId),
+                this.getNodeWorkerRuns({ taskId, limit: workerRunsLimit, offset: 0 }),
+                this.getApprovalRequests({
+                    taskId,
+                    status: "PENDING",
+                    limit: approvalsLimit,
+                    offset: 0,
+                }),
+                this.getClarifications(taskId),
+                this.getUnreadChatCount(taskId),
+                this.chat.getMessages(taskId, { limit: messagesLimit, offset: 0 }),
+            ]);
+
+        const suggestedNextActions: string[] = [];
+        if (task.access?.assignmentRole !== "selected_provider" && task.access?.assignmentRole !== "claimed_provider") {
+            suggestedNextActions.push("Verify the current node is the assigned provider before executing protected task work.");
+        }
+        if (task.workflow?.canSelectedNodeClaim) {
+            suggestedNextActions.push("Claim the task on-chain before starting protected execution.");
+        }
+        if (unreadChatCount > 0) {
+            suggestedNextActions.push("Review unread task chat messages from the requester.");
+        }
+        if (clarifications.some((item) => item.status === "OPEN")) {
+            suggestedNextActions.push("Resolve open clarifications or request owner guidance.");
+        }
+        if (pendingApprovals.length > 0) {
+            suggestedNextActions.push("Wait for node-owner approval before continuing the blocked step.");
+        }
+        if (task.workflow?.deliveryStage === "UNDER_REVIEW") {
+            suggestedNextActions.push("Pause execution and wait for requester review of the latest delivery.");
+        }
+        if (suggestedNextActions.length === 0) {
+            suggestedNextActions.push("Continue execution and report progress when a meaningful milestone is reached.");
+        }
+
+        return {
+            task,
+            node,
+            workerRuns,
+            pendingApprovals,
+            clarifications,
+            unreadChatCount,
+            recentMessages: recentMessages.messages,
+            suggestedNextActions,
+        };
+    }
+
     async updateWorkerRun(runId: string, updates: WorkerRunUpdateInput): Promise<WorkerRunData> {
         const res = await fetch(`${this.platformUrl}/api/nodes/me/worker-runs/${runId}`, {
             method: "PATCH",
@@ -1574,6 +1715,30 @@ export class AgentPactAgent {
         }
 
         return body.run;
+    }
+
+    async finishWorkerTaskSession(input: WorkerTaskSessionFinishInput): Promise<WorkerRunData> {
+        const run = await this.updateWorkerRun(input.runId, {
+            status: input.outcome,
+            percent:
+                input.percent ??
+                (input.outcome === "SUCCEEDED" ? 100 : undefined),
+            currentStep:
+                input.currentStep ??
+                (input.outcome === "SUCCEEDED"
+                    ? "Execution completed"
+                    : input.outcome === "FAILED"
+                        ? "Execution failed"
+                        : "Execution cancelled"),
+            summary: input.summary,
+            metadata: input.metadata,
+        });
+
+        if (input.taskId && input.unwatchTask !== false) {
+            this.unwatchTask(input.taskId);
+        }
+
+        return run;
     }
 
     async executeWorkerRunAction(
