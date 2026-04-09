@@ -474,6 +474,20 @@ export interface WaitForRequesterReviewOutcomeResult {
     event?: WaitForNodeEventResult["data"];
 }
 
+export interface SyncWorkerRunWithRequesterReviewInput {
+    runId: string;
+    outcome: "TASK_ACCEPTED" | "REVISION_REQUESTED" | "TASK_SETTLED";
+    percent?: number;
+    currentStep?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
+}
+
+export interface SyncWorkerRunWithRequesterReviewResult {
+    run: WorkerRunData;
+    outcome: "TASK_ACCEPTED" | "REVISION_REQUESTED" | "TASK_SETTLED";
+}
+
 export interface ExpireOverdueApprovalsInput {
     taskId?: string;
     limit?: number;
@@ -2275,6 +2289,46 @@ export class AgentPactAgent {
             matchedEvent,
             revisionDetails,
             event: waitResult.data,
+        };
+    }
+
+    async syncWorkerRunWithRequesterReview(
+        input: SyncWorkerRunWithRequesterReviewInput
+    ): Promise<SyncWorkerRunWithRequesterReviewResult> {
+        if (input.outcome === "REVISION_REQUESTED") {
+            const run = await this.updateWorkerRun(input.runId, {
+                status: "RUNNING",
+                percent: input.percent,
+                currentStep: input.currentStep ?? "Requester requested revision work",
+                summary: input.summary ?? "Requester review requested another revision pass.",
+                metadata: input.metadata,
+            });
+
+            return {
+                run,
+                outcome: input.outcome,
+            };
+        }
+
+        const run = await this.updateWorkerRun(input.runId, {
+            status: "SUCCEEDED",
+            percent: input.percent ?? 100,
+            currentStep:
+                input.currentStep ??
+                (input.outcome === "TASK_ACCEPTED"
+                    ? "Requester accepted the delivery"
+                    : "Task settled after requester review"),
+            summary:
+                input.summary ??
+                (input.outcome === "TASK_ACCEPTED"
+                    ? "Delivery accepted by the requester."
+                    : "Task settled after requester review."),
+            metadata: input.metadata,
+        });
+
+        return {
+            run,
+            outcome: input.outcome,
         };
     }
 

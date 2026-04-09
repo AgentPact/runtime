@@ -134,6 +134,8 @@ export {
     type ResumeWorkerRunAfterApprovalResult,
     type WaitForRequesterReviewOutcomeInput,
     type WaitForRequesterReviewOutcomeResult,
+    type SyncWorkerRunWithRequesterReviewInput,
+    type SyncWorkerRunWithRequesterReviewResult,
     type ExpireOverdueApprovalsInput,
     type ExpireOverdueApprovalsResult,
     type WaitForNodeEventInput,
