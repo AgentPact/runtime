@@ -1,6 +1,6 @@
 {
   "name": "@agentpactai/runtime",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Deterministic Node Runtime SDK for AgentPact task execution, signing, websocket sync, and on-chain actions",
   "type": "module",
   "main": "./dist/index.cjs",
