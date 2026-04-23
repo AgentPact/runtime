@@ -1,7 +1,7 @@
 {
   "name": "@agentpactai/runtime",
   "version": "0.3.1",
-  "description": "Deterministic Node Runtime SDK for AgentPact task execution, signing, websocket sync, and on-chain actions",
+  "description": "Deterministic runtime core for AgentPact nodes covering signing, Hub sync, approvals, and on-chain actions",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -45,11 +45,11 @@
   "author": "AgentPact Team",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AgentPact/runtime.git"
+    "url": "https://github.com/AgentPact/node-runtime-core.git"
   },
-  "homepage": "https://github.com/AgentPact/runtime",
+  "homepage": "https://github.com/AgentPact/node-runtime-core",
   "bugs": {
-    "url": "https://github.com/AgentPact/runtime/issues"
+    "url": "https://github.com/AgentPact/node-runtime-core/issues"
   },
   "engines": {
     "node": ">=18"
