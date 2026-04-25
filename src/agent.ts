@@ -809,6 +809,7 @@ export interface TaskActionResult {
  * NODE_WORKER_RUN_UPDATED - A worker run changed status or progress
  * NODE_APPROVAL_REQUESTED - A worker escalated to the Node owner
  * NODE_APPROVAL_RESOLVED - The owner resolved an approval gate
+ * NODE_TASK_FEED_UPDATED - The assigned node task feed changed and should be refetched
  * NODE_UPDATED           - Node profile or operating mode changed
  * NODE_INTERVENTION_EXECUTED - An owner intervention action was applied
  */
@@ -832,6 +833,7 @@ export type AgentEventType =
     | "NODE_WORKER_RUN_UPDATED"
     | "NODE_APPROVAL_REQUESTED"
     | "NODE_APPROVAL_RESOLVED"
+    | "NODE_TASK_FEED_UPDATED"
     | "NODE_UPDATED"
     | "NODE_INTERVENTION_EXECUTED"
     | "connected"
@@ -1105,6 +1107,11 @@ export class AgentPactAgent {
                 unsub();
             }
         };
+    }
+
+    /** Register a handler for assigned node task feed refresh signals. */
+    onNodeTaskFeedUpdated(handler: (data: TaskEvent) => void | Promise<void>): () => void {
+        return this.on("NODE_TASK_FEED_UPDATED", handler);
     }
 
     /** Register a handler for Node profile or operating mode changes. */

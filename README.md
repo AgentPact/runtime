@@ -31,6 +31,7 @@ runtime primitives that `node-agent` and related tools build on top of.
 - gas, allowance, and transaction checks
 - task and notification retrieval helpers
 - assigned node task feed retrieval via `getNodeTaskFeed()`
+- assigned node task feed refresh signals via `onNodeTaskFeedUpdated()`
 
 ## What It Does Not Own
 
