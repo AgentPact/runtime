@@ -55,6 +55,7 @@ import {
   http,
   formatEther,
   formatUnits,
+  encodeFunctionData,
   type PublicClient,
   type WalletClient,
   type Transport,
@@ -80,6 +81,7 @@ import { KnowledgeClient } from "./knowledge/knowledgeClient.js";
 import { fetchPlatformConfig } from "./config.js";
 import { queryAvailableTasksFromEnvio } from "./transport/envio.js";
 import { setAgentInternals } from "./agent-internals.js";
+import type { ExternalSigner } from "./signer.js";
 import {
   DEFAULT_PLATFORM_URL,
   DEFAULT_RPC_URL,
@@ -179,6 +181,28 @@ import * as WalletDomain from "./domains/wallet.js";
 import * as WorkersDomain from "./domains/workers.js";
 import * as ApprovalsDomain from "./domains/approvals.js";
 
+function createExternalSignerWalletClient(
+  signer: ExternalSigner,
+  chain: Chain,
+): WalletClient<Transport, Chain, Account> {
+  return {
+    account: { address: signer.address },
+    chain,
+    signMessage: ({ message }: { message: string }) => signer.signMessage(message),
+    writeContract: ({ address, abi, functionName, args, value }: any) =>
+      signer.signTransaction({
+        to: address,
+        data: encodeFunctionData({
+          abi,
+          functionName,
+          args,
+        }),
+        value,
+        chainId: chain.id,
+      }),
+  } as unknown as WalletClient<Transport, Chain, Account>;
+}
+
 export class AgentPactAgent {
   readonly client: AgentPactClient;
   readonly chat: TaskChatClient;
@@ -247,19 +271,8 @@ export class AgentPactAgent {
         ? baseUrl.replace("http://", "ws://") + "/ws"
         : baseUrl.replace("https://", "wss://") + "/ws");
 
-    // Step 3: Create viem clients
-    const pkRaw = options.privateKey;
-    if (!pkRaw) {
-      throw new Error(
-        "AgentCreateOptions requires a privateKey in this version (ExternalSigner is not fully supported yet).",
-      );
-    }
-
-    const pk = pkRaw.startsWith("0x")
-      ? (pkRaw as `0x${string}`)
-      : (`0x${pkRaw}` as `0x${string}`);
-
-    const account = privateKeyToAccount(pk);
+    // Step 3: Create viem clients. Prefer ExternalSigner so Worker hosts never
+    // need raw private-key material in the runtime process.
     const viemChain = (CHAIN_ID as number) === 8453 ? base : baseSepolia;
 
     const publicClient = createPublicClient({
@@ -267,11 +280,29 @@ export class AgentPactAgent {
       transport: http(rpcUrl),
     });
 
-    const walletClient = createWalletClient({
-      account,
-      chain: viemChain,
-      transport: http(rpcUrl),
-    });
+    let walletClient: WalletClient<Transport, Chain, Account>;
+    let walletAddress: `0x${string}`;
+    if (options.signer) {
+      walletClient = createExternalSignerWalletClient(options.signer, viemChain);
+      walletAddress = options.signer.address;
+    } else {
+      const pkRaw = options.privateKey;
+      if (!pkRaw) {
+        throw new Error("AgentCreateOptions requires either a privateKey or an ExternalSigner.");
+      }
+
+      const pk = pkRaw.startsWith("0x")
+        ? (pkRaw as `0x${string}`)
+        : (`0x${pkRaw}` as `0x${string}`);
+
+      const account = privateKeyToAccount(pk);
+      walletAddress = account.address;
+      walletClient = createWalletClient({
+        account,
+        chain: viemChain,
+        transport: http(rpcUrl),
+      }) as WalletClient<Transport, Chain, Account>;
+    }
 
     // Step 4: Build chain config from hardcoded constants (SECURITY)
     const chainConfig = {
@@ -286,7 +317,7 @@ export class AgentPactAgent {
     const client = new AgentPactClient(
       publicClient as PublicClient,
       chainConfig,
-      walletClient as WalletClient<Transport, Chain, Account>,
+      walletClient,
     );
 
     // Step 5: Build platform config object (critical addresses remain hardcoded)
@@ -311,8 +342,8 @@ export class AgentPactAgent {
     if (!jwtToken) {
       jwtToken = await AgentPactAgent.autoSiweLogin(
         baseUrl,
-        account.address,
-        walletClient as WalletClient<Transport, Chain, Account>,
+        walletAddress,
+        walletClient,
       );
     }
 
@@ -322,7 +353,7 @@ export class AgentPactAgent {
         platformUrl: baseUrl,
         wsUrl,
         jwtToken,
-        walletAddress: account.address,
+        walletAddress,
         wsOptions: options.wsOptions,
         autoClaimOnSignature: options.autoClaimOnSignature ?? false,
       },
