@@ -86,3 +86,82 @@ export async function createSignedAssignment(
 
     return { escrowId, agent, nonce, expiredAt, signature };
 }
+
+// ─── ExternalSigner — Private Key Isolation ──────────────────────────────────
+
+/**
+ * A signing adapter that does NOT expose raw private keys to the runtime.
+ * All signing operations are delegated to an external implementation.
+ *
+ * ## Usage (IPC / isolated process)
+ * ```ts
+ * import type { ExternalSigner } from "@agentpactai/runtime";
+ *
+ * const signer: ExternalSigner = {
+ *   address: "0xABCDEF...",
+ *   signMessage: async (msg) => ipcBridge.signMessage(msg),
+ *   signTypedData: async (data) => ipcBridge.signTypedData(data),
+ *   signTransaction: async (tx) => ipcBridge.signTransaction(tx),
+ * };
+ * const agent = await AgentPactAgent.create({ signer, platformUrl: "..." });
+ * ```
+ */
+export interface ExternalSigner {
+    /** The wallet address associated with this signer */
+    readonly address: `0x${string}`;
+
+    /** Sign an arbitrary message (EIP-191 personal_sign) */
+    signMessage(message: string): Promise<`0x${string}`>;
+
+    /**
+     * Sign EIP-712 typed data.
+     * The implementation receives the full domain + types + value object.
+     */
+    signTypedData(data: {
+        domain: Record<string, unknown>;
+        types: Record<string, Array<{ name: string; type: string }>>;
+        primaryType: string;
+        message: Record<string, unknown>;
+    }): Promise<`0x${string}`>;
+
+    /**
+     * Sign and broadcast a transaction.
+     * Returns the transaction hash.
+     */
+    signTransaction(tx: {
+        to: `0x${string}`;
+        data?: `0x${string}`;
+        value?: bigint;
+        gas?: bigint;
+        maxFeePerGas?: bigint;
+        maxPriorityFeePerGas?: bigint;
+        nonce?: number;
+        chainId?: number;
+    }): Promise<`0x${string}`>;
+}
+
+/**
+ * Create an ExternalSigner from a viem WalletClient.
+ * This is the "local / direct" mode bridge — for backward compatibility.
+ */
+export function createLocalSigner(
+    walletClient: WalletClient<Transport, Chain, Account>,
+): ExternalSigner {
+    return {
+        address: walletClient.account.address,
+
+        signMessage: (message) =>
+            walletClient.signMessage({ message }),
+
+        signTypedData: (data) =>
+            walletClient.signTypedData({
+                domain: data.domain as Record<string, unknown>,
+                types: data.types as Record<string, Array<{ name: string; type: string }>>,
+                primaryType: data.primaryType as string,
+                message: data.message as Record<string, unknown>,
+            }),
+
+        signTransaction: (tx) =>
+            walletClient.sendTransaction(tx as Parameters<typeof walletClient.sendTransaction>[0]),
+    };
+}

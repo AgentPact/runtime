@@ -843,6 +843,13 @@ export type AgentEventType =
 
 // ──── Agent Class ────────────────────────────────────────────────
 
+
+import * as IdentityDomain from "./domains/identity.js";
+import * as TasksDomain from "./domains/tasks.js";
+import * as WalletDomain from "./domains/wallet.js";
+import * as WorkersDomain from "./domains/workers.js";
+import * as ApprovalsDomain from "./domains/approvals.js";
+
 export class AgentPactAgent {
     readonly client: AgentPactClient;
     readonly chat: TaskChatClient;
@@ -850,14 +857,14 @@ export class AgentPactAgent {
     readonly knowledge: KnowledgeClient;
     readonly platformConfig: PlatformConfig;
     readonly walletAddress: `0x${string}`;
-    private ws: AgentPactWebSocket;
-    private platformUrl: string;
-    private jwtToken: string;
-    private autoClaimOnSignature: boolean;
-    private assignmentSignatures = new Map<string, AssignmentSignatureData>();
-    private handlers = new Map<string, Set<(data: TaskEvent) => void | Promise<void>>>();
-    private subscribedTasks = new Set<string>();
-    private _running = false;
+    /** @internal */ public ws: AgentPactWebSocket;
+    /** @internal */ public platformUrl: string;
+    /** @internal */ public jwtToken: string;
+    /** @internal */ public autoClaimOnSignature: boolean;
+    /** @internal */ public assignmentSignatures = new Map<string, AssignmentSignatureData>();
+    /** @internal */ public handlers = new Map<string, Set<(data: TaskEvent) => void | Promise<void>>>();
+    /** @internal */ public subscribedTasks = new Set<string>();
+    /** @internal */ public _running = false;
 
     private constructor(
         config: AgentConfig,
@@ -1218,216 +1225,55 @@ export class AgentPactAgent {
 
     /** Get the current agent wallet's native ETH balance */
     async getNativeBalance(): Promise<bigint> {
-        return this.client.getNativeBalance(this.walletAddress);
+        return WalletDomain.getNativeBalance(this);
     }
 
     /** Get the current agent wallet's configured USDC balance */
     async getUsdcBalance(): Promise<bigint> {
-        return this.client.getUsdcBalance(this.walletAddress);
+        return WalletDomain.getUsdcBalance(this);
     }
 
     /** Get a wallet overview for the current agent wallet */
     async getWalletOverview(): Promise<AgentWalletOverview> {
-        const usdcAddress = this.platformConfig.usdcAddress;
-
-        // All 4 RPC calls fire in parallel (single round-trip)
-        const [nativeBalanceWei, usdcRaw, usdcDecimals, usdcSymbol] = await Promise.all([
-            this.getNativeBalance(),
-            this.getUsdcBalance(),
-            this.client.getTokenDecimals(usdcAddress),
-            this.client.getTokenSymbol(usdcAddress),
-        ]);
-
-        return {
-            chainId: this.platformConfig.chainId,
-            walletAddress: this.walletAddress,
-            nativeTokenSymbol: "ETH",
-            nativeBalanceWei,
-            nativeBalanceEth: formatEther(nativeBalanceWei),
-            usdc: {
-                tokenAddress: usdcAddress,
-                symbol: usdcSymbol,
-                decimals: usdcDecimals,
-                raw: usdcRaw,
-                formatted: formatUnits(usdcRaw, usdcDecimals),
-            },
-        };
+        return WalletDomain.getWalletOverview(this);
     }
 
     /** Get the current agent wallet's balance for an arbitrary ERC20 token */
     async getTokenBalanceInfo(token: `0x${string}`): Promise<TokenBalanceInfo> {
-        const [raw, decimals, symbol] = await Promise.all([
-            this.client.getTokenBalance(token, this.walletAddress),
-            this.client.getTokenDecimals(token),
-            this.client.getTokenSymbol(token),
-        ]);
-
-        return {
-            tokenAddress: token,
-            symbol,
-            decimals,
-            raw,
-            formatted: formatUnits(raw, decimals),
-        };
+        return WalletDomain.getTokenBalanceInfo(this, token);
     }
 
     /** Get the current agent wallet's allowance for a spender */
-    async getTokenAllowance(
-        token: `0x${string}`,
-        spender: `0x${string}`
-    ): Promise<bigint> {
-        return this.client.getTokenAllowance(token, this.walletAddress, spender);
+    async getTokenAllowance(token: `0x${string}`, spender: `0x${string}`): Promise<bigint> {
+        return WalletDomain.getTokenAllowance(this, token, spender);
     }
 
     /** Approve an ERC20 spender from the current agent wallet */
-    async approveToken(
-        token: `0x${string}`,
-        spender: `0x${string}`,
-        amount?: bigint
-    ): Promise<string> {
-        const txHash = await this.client.approveToken(token, spender, amount);
-        console.error(`[Agent] Token approval submitted on-chain: ${txHash}`);
-        return txHash;
+    async approveToken(token: `0x${string}`, spender: `0x${string}`, amount?: bigint): Promise<string> {
+        return WalletDomain.approveToken(this, token, spender, amount);
     }
 
     /** Wait for a transaction receipt */
-    async waitForTransaction(
-        hash: `0x${string}`,
-        options?: {
+    async waitForTransaction(hash: `0x${string}`, options?: {
             confirmations?: number;
             timeoutMs?: number;
-        }
-    ): Promise<TransactionReceiptSummary> {
-        return this.client.waitForTransaction(hash, options);
+        }): Promise<TransactionReceiptSummary> {
+        return WalletDomain.waitForTransaction(this, hash, options);
     }
 
     /** Read the latest observable status of a transaction */
     async getTransactionStatus(hash: `0x${string}`): Promise<TransactionStatusSummary> {
-        return this.client.getTransactionStatus(hash);
+        return WalletDomain.getTransactionStatus(this, hash);
     }
 
     /** Estimate gas and fee cost for a supported write action */
     async getGasQuote(params: GasQuoteRequest): Promise<GasQuoteSummary> {
-        return this.client.getGasQuote(params);
+        return WalletDomain.getGasQuote(this, params);
     }
 
     /** Run a lightweight safety check before a gas-spending or token-spending action */
     async preflightCheck(params: PreflightCheckRequest = {}): Promise<PreflightCheckResult> {
-        const notes: string[] = [];
-        const blockingReasons: string[] = [];
-
-        // ── Round 1: chainId + wallet + gasQuote in parallel ──
-        const gasQuotePromise = params.action
-            ? this.getGasQuote({
-                action: params.action,
-                tokenAddress: params.tokenAddress,
-                spender: params.spender,
-                requiredAmount: undefined,
-                amount: params.requiredAmount,
-                escrowId: params.escrowId,
-                deliveryHash: params.deliveryHash,
-            } as GasQuoteRequest & { requiredAmount?: bigint })
-            : Promise.resolve(undefined);
-
-        const [chainId, wallet, gasQuote] = await Promise.all([
-            this.client.getChainId(),
-            this.getWalletOverview(),
-            gasQuotePromise,
-        ]);
-
-        if (!params.action) {
-            notes.push("No action-specific gas quote requested.");
-        }
-
-        const chainOk = chainId === this.platformConfig.chainId;
-        if (!chainOk) {
-            blockingReasons.push(
-                `Connected chainId ${chainId} does not match expected chainId ${this.platformConfig.chainId}`
-            );
-        }
-
-        const minNativeBalanceWei = params.minNativeBalanceWei ?? gasQuote?.estimatedTotalCostWei;
-        const gasBalanceOk = minNativeBalanceWei !== undefined
-            ? wallet.nativeBalanceWei >= minNativeBalanceWei
-            : undefined;
-        if (gasBalanceOk === false) {
-            blockingReasons.push(
-                `Native ETH balance ${wallet.nativeBalanceEth} is below the required threshold`
-            );
-        }
-
-        // ── Round 2: token balance + allowance in parallel ──
-        let token: TokenBalanceInfo | undefined;
-        let tokenBalanceOk: boolean | undefined;
-        let allowance: PreflightCheckResult["allowance"];
-
-        if (params.tokenAddress) {
-            const tokenPromise = this.getTokenBalanceInfo(params.tokenAddress);
-            const allowancePromise = params.spender
-                ? this.getTokenAllowance(params.tokenAddress, params.spender)
-                : Promise.resolve(undefined);
-
-            const [tokenInfo, allowanceRaw] = await Promise.all([
-                tokenPromise,
-                allowancePromise,
-            ]);
-
-            token = tokenInfo;
-            if (params.requiredAmount !== undefined) {
-                tokenBalanceOk = token.raw >= params.requiredAmount;
-                if (!tokenBalanceOk) {
-                    blockingReasons.push(
-                        `Token balance ${token.formatted} ${token.symbol} is below the required amount`
-                    );
-                }
-            }
-
-            if (params.spender && allowanceRaw !== undefined) {
-                allowance = {
-                    tokenAddress: params.tokenAddress,
-                    spender: params.spender,
-                    raw: allowanceRaw,
-                    formatted: formatUnits(allowanceRaw, token.decimals),
-                };
-
-                if (params.requiredAmount !== undefined) {
-                    allowance.requiredRaw = params.requiredAmount;
-                    allowance.requiredFormatted = formatUnits(params.requiredAmount, token.decimals);
-                    allowance.sufficient = allowanceRaw >= params.requiredAmount;
-                    if (!allowance.sufficient) {
-                        blockingReasons.push(
-                            `Allowance ${allowance.formatted} is below the required amount ${allowance.requiredFormatted}`
-                        );
-                    }
-                }
-            }
-        }
-
-        if (!params.tokenAddress) {
-            notes.push("No token balance check requested.");
-        }
-        if (!params.spender) {
-            notes.push("No allowance check requested.");
-        }
-
-        return {
-            action: params.action,
-            chainId,
-            expectedChainId: this.platformConfig.chainId,
-            walletAddress: this.walletAddress,
-            chainOk,
-            nativeBalanceWei: wallet.nativeBalanceWei,
-            nativeBalanceEth: wallet.nativeBalanceEth,
-            minNativeBalanceWei,
-            gasQuote,
-            gasBalanceOk,
-            token,
-            tokenBalanceOk,
-            allowance,
-            canProceed: blockingReasons.length === 0,
-            blockingReasons,
-            notes,
-        };
+        return WalletDomain.preflightCheck(this, params);
     }
 
     // ──── Task Lifecycle Methods ─────────────────────────────────────
@@ -1436,21 +1282,21 @@ export class AgentPactAgent {
      * Legacy helper retained for compatibility with older hosts.
      */
     async confirmTask(escrowId: bigint): Promise<string> {
-        return this.client.confirmTask(escrowId);
+        return TasksDomain.confirmTask(this, escrowId);
     }
 
     /**
      * Legacy helper retained for compatibility with older hosts.
      */
     async declineTask(escrowId: bigint): Promise<string> {
-        return this.client.declineTask(escrowId);
+        return TasksDomain.declineTask(this, escrowId);
     }
 
     /**
      * Returns the cached assignment signature for a selected task, if present.
      */
-    getAssignmentSignature(taskId: string): AssignmentSignatureData | undefined {
-        return this.assignmentSignatures.get(taskId);
+     getAssignmentSignature(taskId: string): AssignmentSignatureData | undefined {
+        return TasksDomain.getAssignmentSignature(this, taskId);
     }
 
     /**
@@ -1458,62 +1304,14 @@ export class AgentPactAgent {
      * Falls back to the latest persisted signature if the websocket copy is missing.
      */
     async claimAssignedTask(taskId: string): Promise<string> {
-        let assignment = this.assignmentSignatures.get(taskId);
-
-        if (!assignment) {
-            const res = await fetch(`${this.platformUrl}/api/escrow/assignment/${taskId}`, {
-                method: "GET",
-                headers: this.headers(),
-            });
-
-            if (!res.ok) {
-                const errText = await res.text().catch(() => "");
-                throw new Error(`Failed to recover assignment signature: ${res.status} ${errText}`);
-            }
-
-            const body = (await res.json()) as {
-                data?: {
-                    taskId: string;
-                    escrowId: string;
-                    nonce: string;
-                    expiredAt: string;
-                    signature: string;
-                };
-            };
-
-            if (!body.data) {
-                throw new Error("Assignment signature payload missing from platform response");
-            }
-
-            assignment = {
-                taskId: body.data.taskId,
-                escrowId: BigInt(body.data.escrowId),
-                nonce: BigInt(body.data.nonce),
-                expiredAt: BigInt(body.data.expiredAt),
-                signature: body.data.signature as `0x${string}`,
-            };
-            this.assignmentSignatures.set(taskId, assignment);
-        }
-
-        const txHash = await this.client.claimTask({
-            escrowId: assignment.escrowId,
-            nonce: assignment.nonce,
-            expiredAt: assignment.expiredAt,
-            platformSignature: assignment.signature,
-        });
-
-        this.assignmentSignatures.delete(taskId);
-        console.error(`[Agent] Task claimed on-chain: ${txHash} for task ${taskId}`);
-        return txHash;
+        return TasksDomain.claimAssignedTask(this, taskId);
     }
 
     /**
      * Create an off-chain delivery record for a task.
      * Use this before calling `submitDelivery` on-chain.
      */
-    async createTaskDelivery(
-        taskId: string,
-        payload: {
+    async createTaskDelivery(taskId: string, payload: {
             deliveryHash: string;
             content: string;
             artifacts?: unknown;
@@ -1521,44 +1319,15 @@ export class AgentPactAgent {
             revisionChanges?: unknown;
             aiValidationResult?: string;
             isPass?: boolean;
-        }
-    ): Promise<{ success: boolean; delivery: any; transactionData: any }> {
-        const res = await fetch(
-            `${this.platformUrl}/api/tasks/${taskId}/deliveries`,
-            {
-                method: "POST",
-                headers: this.headers(),
-                body: JSON.stringify(payload),
-            }
-        );
-        if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            throw new Error(`Failed to create task delivery: ${res.status} ${errText}`);
-        }
-        return res.json() as Promise<{ success: boolean; delivery: any; transactionData: any }>;
+        }): Promise<{ success: boolean; delivery: any; transactionData: any }> {
+        return TasksDomain.createTaskDelivery(this, taskId, payload);
     }
 
     /**
      * Attach an on-chain transaction hash to an off-chain delivery record.
      */
-    async attachDeliveryTxHash(
-        taskId: string,
-        deliveryId: string,
-        txHash: string
-    ): Promise<unknown> {
-        const res = await fetch(
-            `${this.platformUrl}/api/tasks/${taskId}/deliveries/${deliveryId}/submit`,
-            {
-                method: "POST",
-                headers: this.headers(),
-                body: JSON.stringify({ txHash }),
-            }
-        );
-        if (!res.ok) {
-            const errText = await res.text().catch(() => "");
-            throw new Error(`Failed to attach delivery tx hash: ${res.status} ${errText}`);
-        }
-        return res.json();
+    async attachDeliveryTxHash(taskId: string, deliveryId: string, txHash: string): Promise<unknown> {
+        return TasksDomain.attachDeliveryTxHash(this, taskId, deliveryId, txHash);
     }
 
     /**
@@ -1566,10 +1335,7 @@ export class AgentPactAgent {
      * Calls submitDelivery() on-chain → state becomes Delivered.
      */
     async submitDelivery(escrowId: bigint, deliveryHash: string): Promise<string> {
-        const formattedHash = deliveryHash.startsWith('0x') ? deliveryHash as `0x${string}` : `0x${deliveryHash}` as `0x${string}`;
-        const txHash = await this.client.submitDelivery(escrowId, formattedHash);
-        console.error(`[Agent] Delivery submitted on-chain: ${txHash} for escrow: ${escrowId}`);
-        return txHash;
+        return TasksDomain.submitDelivery(this, escrowId, deliveryHash);
     }
 
     /**
@@ -1577,9 +1343,7 @@ export class AgentPactAgent {
      * Lighter credit penalty than delivery timeout. Task returns to Created for re-matching.
      */
     async abandonTask(escrowId: bigint): Promise<string> {
-        const txHash = await this.client.abandonTask(escrowId);
-        console.error(`[Agent] Task abandoned on-chain: ${txHash}`);
-        return txHash;
+        return TasksDomain.abandonTask(this, escrowId);
     }
 
     /**
@@ -1590,21 +1354,8 @@ export class AgentPactAgent {
      * @param percent - Progress percentage (0-100)
      * @param description - Human-readable progress description
      */
-    async reportProgress(
-        taskId: string,
-        percent: number,
-        description: string
-    ): Promise<void> {
-        const res = await fetch(
-            `${this.platformUrl}/api/tasks/${taskId}/progress`,
-            {
-                method: "POST",
-                headers: this.headers(),
-                body: JSON.stringify({ percent: Math.max(0, Math.min(100, percent)), description }),
-            }
-        );
-        if (!res.ok) throw new Error(`Failed to report progress: ${res.status}`);
-        console.error(`[Agent] Progress reported: ${percent}% — ${description}`);
+    async reportProgress(taskId: string, percent: number, description: string): Promise<void> {
+        return TasksDomain.reportProgress(this, taskId, percent, description);
     }
 
     /**
@@ -1612,9 +1363,7 @@ export class AgentPactAgent {
      * Agent gets full reward. Only callable by requester or provider.
      */
     async claimAcceptanceTimeout(escrowId: bigint): Promise<string> {
-        const txHash = await this.client.claimAcceptanceTimeout(escrowId);
-        console.error(`[Agent] Acceptance timeout claimed: ${txHash}`);
-        return txHash;
+        return TasksDomain.claimAcceptanceTimeout(this, escrowId);
     }
 
     /**
@@ -1622,16 +1371,14 @@ export class AgentPactAgent {
      * Requester gets full refund. Only callable by requester or provider.
      */
     async claimDeliveryTimeout(escrowId: bigint): Promise<string> {
-        const txHash = await this.client.claimDeliveryTimeout(escrowId);
-        console.error(`[Agent] Delivery timeout claimed: ${txHash}`);
-        return txHash;
+        return TasksDomain.claimDeliveryTimeout(this, escrowId);
     }
 
     /**
      * Legacy helper retained for compatibility with older hosts.
      */
     async claimConfirmationTimeout(escrowId: bigint): Promise<string> {
-        return this.client.claimConfirmationTimeout(escrowId);
+        return TasksDomain.claimConfirmationTimeout(this, escrowId);
     }
 
     /**
@@ -1642,14 +1389,7 @@ export class AgentPactAgent {
      * @param revision - Revision number (1-based)
      */
     async getRevisionDetails(taskId: string, revision?: number): Promise<unknown> {
-        const params = revision ? `?revision=${revision}` : "";
-        const res = await fetch(
-            `${this.platformUrl}/api/revisions/${taskId}${params}`,
-            { headers: this.headers() }
-        );
-        if (!res.ok) throw new Error(`Failed to fetch revision details: ${res.status}`);
-        const body = (await res.json()) as { data?: unknown; revisions?: unknown[] };
-        return body.data ?? body.revisions ?? body;
+        return TasksDomain.getRevisionDetails(this, taskId, revision);
     }
 
     /**
@@ -1657,14 +1397,7 @@ export class AgentPactAgent {
      * Platform will prefer Envio projections and fall back to local task logs when needed.
      */
     async getTaskTimeline(taskId: string): Promise<TaskTimelineItem[]> {
-        const res = await fetch(
-            `${this.platformUrl}/api/tasks/${taskId}/timeline`,
-            { headers: this.headers() }
-        );
-
-        if (!res.ok) throw new Error(`Failed to fetch task timeline: ${res.status}`);
-        const body = (await res.json()) as { data?: TaskTimelineItem[] };
-        return body.data ?? [];
+        return TasksDomain.getTaskTimeline(this, taskId);
     }
 
     /**
@@ -1673,14 +1406,7 @@ export class AgentPactAgent {
      * and to the claimed provider after the task enters Working.
      */
     async fetchTaskDetails(taskId: string): Promise<TaskDetailsData> {
-        const res = await fetch(
-            `${this.platformUrl}/api/tasks/${taskId}/details`,
-            { headers: this.headers() }
-        );
-
-        if (!res.ok) throw new Error(`Failed to fetch task details: ${res.status}`);
-        const body = (await res.json()) as { data?: TaskDetailsData };
-        return (body.data ?? body) as TaskDetailsData;
+        return TasksDomain.fetchTaskDetails(this, taskId);
     }
 
     /**
@@ -1762,215 +1488,49 @@ export class AgentPactAgent {
         entries: NodeActionLogEntry[];
         pagination: { total: number; limit: number; offset: number };
     }> {
-        const params = new URLSearchParams();
-        params.set("limit", String(options.limit ?? 30));
-        params.set("offset", String(options.offset ?? 0));
-        if (options.taskId) params.set("taskId", options.taskId);
-
-        const res = await fetch(
-            `${this.platformUrl}/api/nodes/me/action-log?${params.toString()}`,
-            { headers: this.headers() }
-        );
-
-        if (!res.ok) throw new Error(`Failed to fetch node action log: ${res.status}`);
-        const body = (await res.json()) as {
-            entries?: NodeActionLogEntry[];
-            pagination?: { total: number; limit: number; offset: number };
-        };
-
-        return {
-            entries: body.entries ?? [],
-            pagination: body.pagination ?? {
-                total: body.entries?.length ?? 0,
-                limit: options.limit ?? 30,
-                offset: options.offset ?? 0,
-            },
-        };
+        return IdentityDomain.getNodeActionLog(this, options);
     }
 
-    async registerProvider(
-        agentType: string = "openclaw-agent",
-        capabilities: string[] = ["general"]
-    ): Promise<ProviderRegistrationData> {
-        const res = await fetch(`${this.platformUrl}/api/providers`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify({ agentType, capabilities }),
-        });
-
-        if (!res.ok) throw new Error(`Failed to register provider: ${res.status}`);
-        const body = (await res.json()) as { profile?: ProviderRegistrationData; data?: ProviderRegistrationData };
-        return (body.profile ?? body.data)!;
+    async registerProvider(agentType: string = "openclaw-agent", capabilities: string[] = ["general"]): Promise<ProviderRegistrationData> {
+        return IdentityDomain.registerProvider(this, agentType, capabilities);
     }
 
-    async ensureProviderProfile(
-        agentType: string = "openclaw-agent",
-        capabilities: string[] = ["general"]
-    ): Promise<ProviderRegistrationData | null> {
-        const meRes = await fetch(`${this.platformUrl}/api/auth/me`, {
-            headers: this.headers(),
-        });
-        if (!meRes.ok) {
-            throw new Error(`Failed to fetch current profile: ${meRes.status}`);
-        }
-
-        const meBody = (await meRes.json()) as { user?: { providerProfile?: ProviderRegistrationData | null } };
-        if (meBody.user?.providerProfile) {
-            return meBody.user.providerProfile;
-        }
-
-        return this.registerProvider(agentType, capabilities);
+    async ensureProviderProfile(agentType: string = "openclaw-agent", capabilities: string[] = ["general"]): Promise<ProviderRegistrationData | null> {
+        return IdentityDomain.ensureProviderProfile(this, agentType, capabilities);
     }
 
     // ──── Convenience Methods ────────────────────────────────────────
 
     async getCurrentUser(): Promise<CurrentUserData> {
-        const res = await fetch(`${this.platformUrl}/api/auth/me`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch current user: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { user?: CurrentUserData };
-        if (!body.user) {
-            throw new Error("Current user payload missing");
-        }
-
-        return body.user;
+        return IdentityDomain.getCurrentUser(this);
     }
 
     async getProviderProfile(): Promise<ProviderProfileData> {
-        const res = await fetch(`${this.platformUrl}/api/providers/me`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch provider profile: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { profile?: ProviderProfileData };
-        if (!body.profile) {
-            throw new Error("Provider profile payload missing");
-        }
-
-        return body.profile;
+        return IdentityDomain.getProviderProfile(this);
     }
 
     async updateProviderProfile(updates: ProviderProfileUpdate): Promise<ProviderProfileData> {
-        const res = await fetch(`${this.platformUrl}/api/providers/me`, {
-            method: "PATCH",
-            headers: this.headers(),
-            body: JSON.stringify(updates),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to update provider profile: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { profile?: ProviderProfileData };
-        if (!body.profile) {
-            throw new Error("Updated provider profile payload missing");
-        }
-
-        return body.profile;
+        return IdentityDomain.updateProviderProfile(this, updates);
     }
 
     async registerNode(input: AgentNodeRegistrationData): Promise<AgentNodeData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(input),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to register node: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { node?: AgentNodeData };
-        if (!body.node) {
-            throw new Error("Agent Node payload missing");
-        }
-
-        return body.node;
+        return IdentityDomain.registerNode(this, input);
     }
 
     async ensureNode(input?: Partial<AgentNodeRegistrationData>): Promise<AgentNodeData> {
-        const me = await this.getCurrentUser();
-        if (me.agentNode) {
-            return me.agentNode;
-        }
-
-        const fallbackName = `Node ${this.walletAddress.slice(0, 6)}`;
-        return this.registerNode({
-            displayName: input?.displayName ?? fallbackName,
-            slug: input?.slug,
-            description: input?.description,
-            automationMode: input?.automationMode,
-            headline: input?.headline,
-            capabilityTags: input?.capabilityTags,
-            policy: input?.policy,
-            agentType: input?.agentType,
-            capabilities: input?.capabilities,
-            preferredCategories: input?.preferredCategories,
-            portfolioLinks: input?.portfolioLinks,
-        });
+        return IdentityDomain.ensureNode(this, input);
     }
 
     async getMyNode(): Promise<AgentNodeData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch Agent Node: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { node?: AgentNodeData };
-        if (!body.node) {
-            throw new Error("Agent Node payload missing");
-        }
-
-        return body.node;
+        return IdentityDomain.getMyNode(this);
     }
 
     async updateMyNode(updates: AgentNodeUpdate): Promise<AgentNodeData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me`, {
-            method: "PATCH",
-            headers: this.headers(),
-            body: JSON.stringify(updates),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to update Agent Node: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { node?: AgentNodeData };
-        if (!body.node) {
-            throw new Error("Updated Agent Node payload missing");
-        }
-
-        return body.node;
+        return IdentityDomain.updateMyNode(this, updates);
     }
 
     async executeNodeAction(input: NodeActionInput): Promise<AgentNodeData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/actions`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(input),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to execute node action: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { node?: AgentNodeData };
-        if (!body.node) {
-            throw new Error("Node action payload missing");
-        }
-
-        return body.node;
+        return IdentityDomain.executeNodeAction(this, input);
     }
 
     async getNodeWorkerRuns(options: {
@@ -1979,432 +1539,63 @@ export class AgentPactAgent {
         limit?: number;
         offset?: number;
     } = {}): Promise<WorkerRunData[]> {
-        const params = new URLSearchParams();
-        if (options.status) params.set("status", options.status);
-        if (options.taskId) params.set("taskId", options.taskId);
-        params.set("limit", String(options.limit ?? 20));
-        params.set("offset", String(options.offset ?? 0));
-
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/worker-runs?${params.toString()}`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch worker runs: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { runs?: WorkerRunData[] };
-        return body.runs ?? [];
+        return WorkersDomain.getNodeWorkerRuns(this, options);
     }
 
     async createWorkerRun(input: WorkerRunCreateInput): Promise<WorkerRunData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/worker-runs`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(input),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to create worker run: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { run?: WorkerRunData };
-        if (!body.run) {
-            throw new Error("Worker run payload missing");
-        }
-
-        return body.run;
+        return WorkersDomain.createWorkerRun(this, input);
     }
 
     async startWorkerTaskSession(input: WorkerTaskSessionStartInput): Promise<WorkerTaskSessionStartResult> {
-        const [node, task] = await Promise.all([
-            this.ensureNode(input.ensureNode),
-            this.fetchTaskDetails(input.taskId),
-        ]);
-
-        this.watchTask(input.taskId);
-
-        const run = await this.createWorkerRun({
-            taskId: input.taskId,
-            hostKind: input.hostKind,
-            workerKey: input.workerKey,
-            displayName: input.displayName,
-            model: input.model,
-            status: "RUNNING",
-            percent: 0,
-            currentStep: input.currentStep ?? "Task context loaded",
-            summary: input.summary ?? `Execution session started for ${task.title ?? input.taskId}`,
-            metadata: input.metadata,
-        });
-
-        const brief = await this.getWorkerTaskExecutionBrief({
-            taskId: input.taskId,
-        });
-
-        return {
-            node,
-            run,
-            task,
-            brief,
-        };
+        return WorkersDomain.startWorkerTaskSession(this, input);
     }
 
-    async resumeWorkerTaskSession(
-        input: WorkerTaskSessionResumeInput
-    ): Promise<WorkerTaskSessionResumeResult> {
-        const [node, task, runs] = await Promise.all([
-            this.ensureNode(input.ensureNode),
-            this.fetchTaskDetails(input.taskId),
-            this.getNodeWorkerRuns({ taskId: input.taskId, limit: 50, offset: 0 }),
-        ]);
-
-        this.watchTask(input.taskId);
-
-        const existingRun = runs
-            .filter((run) => run.workerKey === input.workerKey)
-            .filter((run) => run.hostKind === input.hostKind)
-            .filter((run) => isActiveWorkerRunStatus(run.status))
-            .sort((a, b) => {
-                const aTime = new Date(String(a.lastHeartbeatAt ?? a.updatedAt ?? a.createdAt ?? 0)).getTime();
-                const bTime = new Date(String(b.lastHeartbeatAt ?? b.updatedAt ?? b.createdAt ?? 0)).getTime();
-                return bTime - aTime;
-            })[0];
-
-        if (!existingRun) {
-            if (!input.createIfMissing) {
-                throw new Error(
-                    `No active worker session found for task ${input.taskId} and workerKey ${input.workerKey}`
-                );
-            }
-
-            const started = await this.startWorkerTaskSession(input);
-            return {
-                ...started,
-                reusedExistingRun: false,
-            };
-        }
-
-        const run = await this.heartbeatWorkerRun(existingRun.id, {
-            percent: existingRun.percent,
-            currentStep: input.currentStep ?? existingRun.currentStep ?? "Worker session resumed",
-            summary: input.summary ?? existingRun.summary ?? `Execution session resumed for ${task.title ?? input.taskId}`,
-            metadata: input.metadata,
-        });
-
-        const brief = await this.getWorkerTaskExecutionBrief({
-            taskId: input.taskId,
-        });
-
-        return {
-            node,
-            run,
-            task,
-            brief,
-            reusedExistingRun: true,
-        };
+    async resumeWorkerTaskSession(input: WorkerTaskSessionResumeInput): Promise<WorkerTaskSessionResumeResult> {
+        return WorkersDomain.resumeWorkerTaskSession(this, input);
     }
 
-    async claimTaskForWorkerRun(
-        input: WorkerRunClaimTaskInput
-    ): Promise<WorkerRunClaimTaskResult> {
-        this.watchTask(input.taskId);
-
-        const txHash = await this.claimAssignedTask(input.taskId);
-        const [run, task] = await Promise.all([
-            this.updateWorkerRun(input.runId, {
-                status: "RUNNING",
-                percent: input.percent,
-                currentStep: input.currentStep ?? "Task claimed on-chain, protected execution unlocked",
-                summary: input.summary ?? "Task claimed successfully and worker execution may continue.",
-                metadata: input.metadata,
-            }),
-            this.fetchTaskDetails(input.taskId),
-        ]);
-
-        return {
-            txHash,
-            run,
-            task,
-        };
+    async claimTaskForWorkerRun(input: WorkerRunClaimTaskInput): Promise<WorkerRunClaimTaskResult> {
+        return WorkersDomain.claimTaskForWorkerRun(this, input);
     }
 
-    async getWorkerTaskExecutionBrief(
-        options: WorkerTaskExecutionBriefOptions
-    ): Promise<WorkerTaskExecutionBrief> {
-        const taskId = options.taskId;
-        const messagesLimit = options.messagesLimit ?? 20;
-        const workerRunsLimit = options.workerRunsLimit ?? 10;
-        const approvalsLimit = options.approvalsLimit ?? 20;
-
-        const [node, task, workerRuns, pendingApprovals, clarifications, unreadChatCount, recentMessages] =
-            await Promise.all([
-                this.getMyNode(),
-                this.fetchTaskDetails(taskId),
-                this.getNodeWorkerRuns({ taskId, limit: workerRunsLimit, offset: 0 }),
-                this.getApprovalRequests({
-                    taskId,
-                    status: "PENDING",
-                    limit: approvalsLimit,
-                    offset: 0,
-                }),
-                this.getClarifications(taskId),
-                this.getUnreadChatCount(taskId),
-                this.chat.getMessages(taskId, { limit: messagesLimit, offset: 0 }),
-            ]);
-
-        const suggestedNextActions: string[] = [];
-        if (task.access?.assignmentRole !== "selected_provider" && task.access?.assignmentRole !== "claimed_provider") {
-            suggestedNextActions.push("Verify the current node is the assigned provider before executing protected task work.");
-        }
-        if (task.workflow?.canSelectedNodeClaim) {
-            suggestedNextActions.push("Claim the task on-chain before starting protected execution.");
-        }
-        if (unreadChatCount > 0) {
-            suggestedNextActions.push("Review unread task chat messages from the requester.");
-        }
-        if (clarifications.some((item) => item.status === "OPEN")) {
-            suggestedNextActions.push("Resolve open clarifications or request owner guidance.");
-        }
-        if (pendingApprovals.length > 0) {
-            suggestedNextActions.push("Wait for node-owner approval before continuing the blocked step.");
-        }
-        if (task.workflow?.deliveryStage === "UNDER_REVIEW") {
-            suggestedNextActions.push("Pause execution and wait for requester review of the latest delivery.");
-        }
-        if (suggestedNextActions.length === 0) {
-            suggestedNextActions.push("Continue execution and report progress when a meaningful milestone is reached.");
-        }
-
-        return {
-            task,
-            node,
-            workerRuns,
-            pendingApprovals,
-            clarifications,
-            unreadChatCount,
-            recentMessages: recentMessages.messages,
-            suggestedNextActions,
-        };
+    async getWorkerTaskExecutionBrief(options: WorkerTaskExecutionBriefOptions): Promise<WorkerTaskExecutionBrief> {
+        return WorkersDomain.getWorkerTaskExecutionBrief(this, options);
     }
 
     async updateWorkerRun(runId: string, updates: WorkerRunUpdateInput): Promise<WorkerRunData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/worker-runs/${runId}`, {
-            method: "PATCH",
-            headers: this.headers(),
-            body: JSON.stringify(updates),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to update worker run: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { run?: WorkerRunData };
-        if (!body.run) {
-            throw new Error("Updated worker run payload missing");
-        }
-
-        return body.run;
+        return WorkersDomain.updateWorkerRun(this, runId, updates);
     }
 
     async heartbeatWorkerRun(runId: string, heartbeat: WorkerRunHeartbeatInput = {}): Promise<WorkerRunData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/worker-runs/${runId}/heartbeat`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(heartbeat),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to heartbeat worker run: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { run?: WorkerRunData };
-        if (!body.run) {
-            throw new Error("Worker run heartbeat payload missing");
-        }
-
-        return body.run;
+        return WorkersDomain.heartbeatWorkerRun(this, runId, heartbeat);
     }
 
     async finishWorkerTaskSession(input: WorkerTaskSessionFinishInput): Promise<WorkerRunData> {
-        const run = await this.updateWorkerRun(input.runId, {
-            status: input.outcome,
-            percent:
-                input.percent ??
-                (input.outcome === "SUCCEEDED" ? 100 : undefined),
-            currentStep:
-                input.currentStep ??
-                (input.outcome === "SUCCEEDED"
-                    ? "Execution completed"
-                    : input.outcome === "FAILED"
-                        ? "Execution failed"
-                        : "Execution cancelled"),
-            summary: input.summary,
-            metadata: input.metadata,
-        });
-
-        if (input.taskId && input.unwatchTask !== false) {
-            this.unwatchTask(input.taskId);
-        }
-
-        return run;
+        return WorkersDomain.finishWorkerTaskSession(this, input);
     }
 
-    async submitDeliveryForWorkerRun(
-        input: WorkerRunSubmitDeliveryInput
-    ): Promise<WorkerRunSubmitDeliveryResult> {
-        const deliveryResult = await this.createTaskDelivery(input.taskId, {
-            deliveryHash: input.deliveryHash,
-            content: input.content ?? "Delivery submitted by worker session.",
-            artifacts: input.artifacts,
-            selfTestResults: input.selfTestResults,
-            revisionChanges: input.revisionChanges,
-            aiValidationResult: input.aiValidationResult,
-            isPass: input.isPass,
-        });
-
-        const txHash = await this.submitDelivery(input.escrowId, input.deliveryHash);
-        await this.attachDeliveryTxHash(input.taskId, deliveryResult.delivery.id, txHash);
-
-        const run = await this.updateWorkerRun(input.runId, {
-            status: "RUNNING",
-            percent: input.percent ?? 100,
-            currentStep: input.currentStep ?? "Delivery submitted, waiting for requester review",
-            summary: input.summary ?? "Delivery submitted successfully and is now under requester review.",
-            metadata: input.metadata,
-        });
-
-        return {
-            txHash,
-            deliveryId: deliveryResult.delivery.id,
-            delivery: deliveryResult.delivery,
-            run,
-        };
+    async submitDeliveryForWorkerRun(input: WorkerRunSubmitDeliveryInput): Promise<WorkerRunSubmitDeliveryResult> {
+        return WorkersDomain.submitDeliveryForWorkerRun(this, input);
     }
 
-    async abandonTaskForWorkerRun(
-        input: WorkerRunAbandonTaskInput
-    ): Promise<WorkerRunAbandonTaskResult> {
-        const txHash = await this.abandonTask(input.escrowId);
-        const run = await this.finishWorkerTaskSession({
-            runId: input.runId,
-            taskId: input.taskId,
-            outcome: "CANCELLED",
-            percent: input.percent,
-            currentStep: input.currentStep ?? "Task abandoned on-chain",
-            summary: input.summary ?? "Task abandoned and returned for re-matching.",
-            metadata: input.metadata,
-            unwatchTask: input.unwatchTask,
-        });
-
-        return {
-            txHash,
-            run,
-        };
+    async abandonTaskForWorkerRun(input: WorkerRunAbandonTaskInput): Promise<WorkerRunAbandonTaskResult> {
+        return WorkersDomain.abandonTaskForWorkerRun(this, input);
     }
 
-    async claimAcceptanceTimeoutForWorkerRun(
-        input: WorkerRunClaimAcceptanceTimeoutInput
-    ): Promise<WorkerRunClaimAcceptanceTimeoutResult> {
-        const txHash = await this.claimAcceptanceTimeout(input.escrowId);
-        const run = await this.finishWorkerTaskSession({
-            runId: input.runId,
-            taskId: input.taskId,
-            outcome: "SUCCEEDED",
-            percent: input.percent ?? 100,
-            currentStep: input.currentStep ?? "Acceptance timeout claimed on-chain",
-            summary: input.summary ?? "Requester review window expired; acceptance timeout claimed.",
-            metadata: input.metadata,
-            unwatchTask: input.unwatchTask,
-        });
-
-        return {
-            txHash,
-            run,
-        };
+    async claimAcceptanceTimeoutForWorkerRun(input: WorkerRunClaimAcceptanceTimeoutInput): Promise<WorkerRunClaimAcceptanceTimeoutResult> {
+        return WorkersDomain.claimAcceptanceTimeoutForWorkerRun(this, input);
     }
 
-    async gateWorkerRunForApproval(
-        input: WorkerApprovalGateInput
-    ): Promise<WorkerApprovalGateResult> {
-        const approval = await this.requestApproval({
-            taskId: input.taskId,
-            workerRunId: input.runId,
-            kind: input.kind,
-            title: input.title,
-            summary: input.summary,
-            payload: input.payload,
-            dueAt: input.dueAt,
-        });
-
-        const run = await this.updateWorkerRun(input.runId, {
-            status: "WAITING_APPROVAL",
-            percent: input.percent,
-            currentStep: input.currentStep ?? "Waiting for node-owner approval",
-            summary: input.runSummary ?? input.summary ?? input.title,
-            metadata: input.metadata,
-        });
-
-        return {
-            run,
-            approval,
-        };
+    async gateWorkerRunForApproval(input: WorkerApprovalGateInput): Promise<WorkerApprovalGateResult> {
+        return WorkersDomain.gateWorkerRunForApproval(this, input);
     }
 
-    async executeWorkerRunAction(
-        runId: string,
-        action: WorkerRunAction,
-        note?: string
-    ): Promise<WorkerRunActionResult> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/worker-runs/${runId}/actions`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify({ action, note }),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to execute worker run action: ${res.status}`);
-        }
-
-        const body = (await res.json()) as {
-            action?: WorkerRunAction;
-            run?: WorkerRunData;
-            replacementRun?: WorkerRunData | null;
-        };
-        if (!body.action || !body.run) {
-            throw new Error("Worker run action payload missing");
-        }
-
-        return {
-            action: body.action,
-            run: body.run,
-            replacementRun: body.replacementRun ?? null,
-        };
+    async executeWorkerRunAction(runId: string, action: WorkerRunAction, note?: string): Promise<WorkerRunActionResult> {
+        return WorkersDomain.executeWorkerRunAction(this, runId, action, note);
     }
 
-    async resolveStaleWorkerRuns(
-        input: ResolveStaleWorkerRunsInput
-    ): Promise<ResolveStaleWorkerRunsResult> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/worker-runs/resolve-stale`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(input),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to resolve stale worker runs: ${res.status}`);
-        }
-
-        const body = (await res.json()) as {
-            action?: Exclude<WorkerRunAction, "RETRY">;
-            resolvedCount?: number;
-            runs?: WorkerRunData[];
-        };
-
-        return {
-            action: body.action ?? input.action,
-            resolvedCount: body.resolvedCount ?? 0,
-            runs: body.runs ?? [],
-        };
+    async resolveStaleWorkerRuns(input: ResolveStaleWorkerRunsInput): Promise<ResolveStaleWorkerRunsResult> {
+        return WorkersDomain.resolveStaleWorkerRuns(this, input);
     }
 
     async getApprovalRequests(options: {
@@ -2413,253 +1604,39 @@ export class AgentPactAgent {
         limit?: number;
         offset?: number;
     } = {}): Promise<ApprovalRequestData[]> {
-        const params = new URLSearchParams();
-        if (options.status) params.set("status", options.status);
-        if (options.taskId) params.set("taskId", options.taskId);
-        params.set("limit", String(options.limit ?? 20));
-        params.set("offset", String(options.offset ?? 0));
-
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/approvals?${params.toString()}`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch approval requests: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { approvals?: ApprovalRequestData[] };
-        return body.approvals ?? [];
+        return ApprovalsDomain.getApprovalRequests(this, options);
     }
 
     async requestApproval(input: ApprovalRequestCreateInput): Promise<ApprovalRequestData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/approvals`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(input),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to create approval request: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { approval?: ApprovalRequestData };
-        if (!body.approval) {
-            throw new Error("Approval request payload missing");
-        }
-
-        return body.approval;
+        return ApprovalsDomain.requestApproval(this, input);
     }
 
-    async resolveApprovalRequest(
-        approvalId: string,
-        resolution: ApprovalRequestResolution
-    ): Promise<ApprovalRequestData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/approvals/${approvalId}/resolve`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(resolution),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to resolve approval request: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { approval?: ApprovalRequestData };
-        if (!body.approval) {
-            throw new Error("Resolved approval payload missing");
-        }
-
-        return body.approval;
+    async resolveApprovalRequest(approvalId: string, resolution: ApprovalRequestResolution): Promise<ApprovalRequestData> {
+        return ApprovalsDomain.resolveApprovalRequest(this, approvalId, resolution);
     }
 
-    async waitForApprovalResolution(
-        input: WaitForApprovalResolutionInput
-    ): Promise<WaitForApprovalResolutionResult> {
-        const waitResult = await this.waitForNodeEvent({
-            events: ["NODE_APPROVAL_RESOLVED", "NODE_APPROVAL_EXPIRED"],
-            taskId: input.taskId,
-            approvalId: input.approvalId,
-            timeoutMs: input.timeoutMs,
-            autoWatchTask: input.autoWatchTask,
-        });
-
-        if (waitResult.timedOut) {
-            return {
-                timedOut: true,
-                matchedEvent: waitResult.matchedEvent,
-                event: waitResult.data,
-            };
-        }
-
-        const approvals = await this.getApprovalRequests({
-            taskId: input.taskId,
-            limit: 100,
-            offset: 0,
-        });
-        const approval = approvals.find((item) => item.id === input.approvalId);
-        if (!approval) {
-            throw new Error(`Approval ${input.approvalId} was resolved but could not be reloaded`);
-        }
-
-        return {
-            approval,
-            timedOut: false,
-            matchedEvent: waitResult.matchedEvent,
-            event: waitResult.data,
-        };
+    async waitForApprovalResolution(input: WaitForApprovalResolutionInput): Promise<WaitForApprovalResolutionResult> {
+        return ApprovalsDomain.waitForApprovalResolution(this, input);
     }
 
-    async resumeWorkerRunAfterApproval(
-        input: ResumeWorkerRunAfterApprovalInput
-    ): Promise<ResumeWorkerRunAfterApprovalResult> {
-        const approvals = await this.getApprovalRequests({
-            taskId: input.taskId,
-            limit: 100,
-            offset: 0,
-        });
-        const approval = approvals.find((item) => item.id === input.approvalId);
-        if (!approval) {
-            throw new Error(`Approval ${input.approvalId} not found for task ${input.taskId}`);
-        }
-        if (approval.status === "PENDING") {
-            throw new Error(`Approval ${input.approvalId} is still pending`);
-        }
-        if (approval.status !== "APPROVED") {
-            throw new Error(`Approval ${input.approvalId} resolved with status ${approval.status} and cannot resume the worker`);
-        }
-
-        const run = await this.updateWorkerRun(input.runId, {
-            status: "RUNNING",
-            percent: input.percent,
-            currentStep: input.currentStep ?? "Owner approval resolved, execution resumed",
-            summary: input.summary ?? approval.responseNote ?? approval.summary ?? approval.title,
-            metadata: input.metadata,
-        });
-
-        return {
-            run,
-            approval,
-        };
+    async resumeWorkerRunAfterApproval(input: ResumeWorkerRunAfterApprovalInput): Promise<ResumeWorkerRunAfterApprovalResult> {
+        return WorkersDomain.resumeWorkerRunAfterApproval(this, input);
     }
 
-    async waitForRequesterReviewOutcome(
-        input: WaitForRequesterReviewOutcomeInput
-    ): Promise<WaitForRequesterReviewOutcomeResult> {
-        const waitResult = await this.waitForNodeEvent({
-            events: ["TASK_ACCEPTED", "REVISION_REQUESTED", "TASK_SETTLED"],
-            taskId: input.taskId,
-            timeoutMs: input.timeoutMs,
-            autoWatchTask: input.autoWatchTask,
-        });
-
-        const task = await this.fetchTaskDetails(input.taskId);
-        if (waitResult.timedOut) {
-            return {
-                task,
-                timedOut: true,
-                matchedEvent: null,
-                event: waitResult.data,
-            };
-        }
-
-        const matchedEvent = waitResult.matchedEvent as
-            | "TASK_ACCEPTED"
-            | "REVISION_REQUESTED"
-            | "TASK_SETTLED";
-        let revisionDetails: unknown;
-
-        if (matchedEvent === "REVISION_REQUESTED") {
-            revisionDetails = await this.getRevisionDetails(input.taskId);
-        }
-
-        return {
-            task,
-            timedOut: false,
-            matchedEvent,
-            revisionDetails,
-            event: waitResult.data,
-        };
+    async waitForRequesterReviewOutcome(input: WaitForRequesterReviewOutcomeInput): Promise<WaitForRequesterReviewOutcomeResult> {
+        return WorkersDomain.waitForRequesterReviewOutcome(this, input);
     }
 
-    async syncWorkerRunWithRequesterReview(
-        input: SyncWorkerRunWithRequesterReviewInput
-    ): Promise<SyncWorkerRunWithRequesterReviewResult> {
-        if (input.outcome === "REVISION_REQUESTED") {
-            const run = await this.updateWorkerRun(input.runId, {
-                status: "RUNNING",
-                percent: input.percent,
-                currentStep: input.currentStep ?? "Requester requested revision work",
-                summary: input.summary ?? "Requester review requested another revision pass.",
-                metadata: input.metadata,
-            });
-
-            return {
-                run,
-                outcome: input.outcome,
-            };
-        }
-
-        const run = await this.updateWorkerRun(input.runId, {
-            status: "SUCCEEDED",
-            percent: input.percent ?? 100,
-            currentStep:
-                input.currentStep ??
-                (input.outcome === "TASK_ACCEPTED"
-                    ? "Requester accepted the delivery"
-                    : "Task settled after requester review"),
-            summary:
-                input.summary ??
-                (input.outcome === "TASK_ACCEPTED"
-                    ? "Delivery accepted by the requester."
-                    : "Task settled after requester review."),
-            metadata: input.metadata,
-        });
-
-        return {
-            run,
-            outcome: input.outcome,
-        };
+    async syncWorkerRunWithRequesterReview(input: SyncWorkerRunWithRequesterReviewInput): Promise<SyncWorkerRunWithRequesterReviewResult> {
+        return WorkersDomain.syncWorkerRunWithRequesterReview(this, input);
     }
 
-    async expireOverdueApprovals(
-        input: ExpireOverdueApprovalsInput = {}
-    ): Promise<ExpireOverdueApprovalsResult> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/approvals/expire-overdue`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify(input),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to expire overdue approvals: ${res.status}`);
-        }
-
-        const body = (await res.json()) as {
-            expiredCount?: number;
-            approvals?: ApprovalRequestData[];
-        };
-
-        return {
-            expiredCount: body.expiredCount ?? 0,
-            approvals: body.approvals ?? [],
-        };
+    async expireOverdueApprovals(input: ExpireOverdueApprovalsInput = {}): Promise<ExpireOverdueApprovalsResult> {
+        return ApprovalsDomain.expireOverdueApprovals(this, input);
     }
 
     async getNodeOpsOverview(): Promise<NodeOpsOverviewData> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/ops-overview`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch node ops overview: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { overview?: NodeOpsOverviewData };
-        if (!body.overview) {
-            throw new Error("Node ops overview payload missing");
-        }
-
-        return body.overview;
+        return IdentityDomain.getNodeOpsOverview(this);
     }
 
     async getNodeTaskFeed(options: {
@@ -2667,52 +1644,11 @@ export class AgentPactAgent {
         limit?: number;
         offset?: number;
     } = {}): Promise<NodeTaskFeedData> {
-        const params = new URLSearchParams();
-        params.set("limit", String(options.limit ?? 20));
-        params.set("offset", String(options.offset ?? 0));
-        if (options.status) params.set("status", options.status);
-
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/task-feed?${params.toString()}`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch node task feed: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { feed?: NodeTaskFeedData };
-        if (!body.feed) {
-            throw new Error("Node task feed payload missing");
-        }
-
-        return body.feed;
+        return IdentityDomain.getNodeTaskFeed(this, options);
     }
 
     async executeTaskAction(taskId: string, action: TaskAction, note?: string): Promise<TaskActionResult> {
-        const res = await fetch(`${this.platformUrl}/api/nodes/me/tasks/${taskId}/actions`, {
-            method: "POST",
-            headers: this.headers(),
-            body: JSON.stringify({ action, note }),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to execute task action: ${res.status}`);
-        }
-
-        const body = (await res.json()) as {
-            action?: TaskAction;
-            note?: string;
-            task?: TaskActionResult["task"];
-        };
-        if (!body.action || !body.task) {
-            throw new Error("Task action payload missing");
-        }
-
-        return {
-            action: body.action,
-            note: body.note,
-            task: body.task,
-        };
+        return TasksDomain.executeTaskAction(this, taskId, action, note);
     }
 
     async getAvailableTasks(options: {
@@ -2720,84 +1656,19 @@ export class AgentPactAgent {
         offset?: number;
         status?: string;
     } = {}): Promise<TaskListItem[]> {
-        const params = new URLSearchParams();
-        params.set("limit", String(options.limit ?? 20));
-        params.set("offset", String(options.offset ?? 0));
-        if (options.status) params.set("status", options.status);
-
-        const fetchFromPlatform = async () => {
-            const res = await fetch(
-                `${this.platformUrl}/api/tasks?${params}`,
-                { headers: this.headers() }
-            );
-
-            if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
-            const body = (await res.json()) as { data?: TaskListItem[]; tasks?: TaskListItem[] };
-            return body.data || body.tasks || [];
-        };
-
-        try {
-            return await fetchFromPlatform();
-        } catch (platformError) {
-            if (!this.platformConfig.envioUrl) {
-                throw platformError;
-            }
-
-            return queryAvailableTasksFromEnvio(this.platformConfig, options);
-        }
+        return TasksDomain.getAvailableTasks(this, options);
     }
 
     async getMyTasks(options: GetMyTasksOptions = {}): Promise<TaskListItem[]> {
-        const currentUser = await this.getCurrentUser();
-        const params = new URLSearchParams();
-        params.set("providerId", currentUser.id);
-        params.set("limit", String(options.limit ?? 20));
-        params.set("offset", String(options.offset ?? 0));
-        if (options.status) params.set("status", options.status);
-        if (options.assignment) params.set("assignment", options.assignment);
-        if (options.sortBy) params.set("sortBy", options.sortBy);
-
-        const res = await fetch(`${this.platformUrl}/api/tasks?${params.toString()}`, {
-            headers: this.headers(),
-        });
-
-        if (!res.ok) {
-            throw new Error(`Failed to fetch provider tasks: ${res.status}`);
-        }
-
-        const body = (await res.json()) as { data?: TaskListItem[]; tasks?: TaskListItem[] };
-        return body.data ?? body.tasks ?? [];
+        return TasksDomain.getMyTasks(this, options);
     }
 
     async bidOnTask(taskId: string, message?: string): Promise<unknown> {
-        const res = await fetch(
-            `${this.platformUrl}/api/matching/bid`,
-            {
-                method: "POST",
-                headers: this.headers(),
-                body: JSON.stringify({ taskId, message }),
-            }
-        );
-
-        if (!res.ok) {
-            const detail = await res.text().catch(() => "");
-            throw new Error(`Failed to bid: ${res.status}${detail ? ` ${detail}` : ""}`);
-        }
-        const body = (await res.json()) as { data?: unknown; task?: unknown };
-        return body.data ?? body.task ?? body;
+        return TasksDomain.bidOnTask(this, taskId, message);
     }
 
     async rejectInvitation(taskId: string, reason?: string): Promise<void> {
-        const res = await fetch(
-            `${this.platformUrl}/api/matching/reject-invitation`,
-            {
-                method: "POST",
-                headers: this.headers(),
-                body: JSON.stringify({ taskId, reason }),
-            }
-        );
-
-        if (!res.ok) throw new Error(`Failed to reject invitation: ${res.status}`);
+        return TasksDomain.rejectInvitation(this, taskId, reason);
     }
 
     async sendMessage(
@@ -2827,7 +1698,7 @@ export class AgentPactAgent {
         return this.chat.markRead(taskId, lastReadMessageId);
     }
 
-    private handleBuiltInEvent(event: string, taskEvent: TaskEvent): void {
+    /** @internal */ public handleBuiltInEvent(event: string, taskEvent: TaskEvent): void {
         switch (event) {
             case "ASSIGNMENT_SIGNATURE":
                 this.cacheAssignmentSignature(taskEvent);
@@ -2838,7 +1709,7 @@ export class AgentPactAgent {
         }
     }
 
-    private cacheAssignmentSignature(event: TaskEvent): void {
+    /** @internal */ public cacheAssignmentSignature(event: TaskEvent): void {
         const data = event.data;
         const taskId = String(data.taskId ?? event.taskId ?? "");
         if (!taskId) {
@@ -2861,7 +1732,7 @@ export class AgentPactAgent {
      * Auto-claim task on-chain when platform delivers EIP-712 signature.
      * This is deterministic — no LLM involved, just contract call.
      */
-    private handleAssignmentSignature(event: TaskEvent): void {
+    /** @internal */ public handleAssignmentSignature(event: TaskEvent): void {
         const data = event.data;
         const taskId = String(data.taskId ?? event.taskId ?? "");
 
@@ -2913,7 +1784,7 @@ export class AgentPactAgent {
 
     // ──── Private ────────────────────────────────────────────────────
 
-    private dispatch(event: string, data: TaskEvent): void {
+    /** @internal */ public dispatch(event: string, data: TaskEvent): void {
         const handlers = this.handlers.get(event);
         if (handlers) {
             for (const handler of handlers) {
@@ -2931,7 +1802,7 @@ export class AgentPactAgent {
         }
     }
 
-    private headers(): Record<string, string> {
+    /** @internal */ public headers(): Record<string, string> {
         return {
             Authorization: `Bearer ${this.jwtToken}`,
             "Content-Type": "application/json",

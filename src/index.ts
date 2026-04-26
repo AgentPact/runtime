@@ -35,7 +35,12 @@ export { AgentPactClient } from "./client.js";
 export { fetchPlatformConfig } from "./config.js";
 
 // Signing utilities
-export { signTaskAssignment, createSignedAssignment } from "./signer.js";
+export {
+    signTaskAssignment,
+    createSignedAssignment,
+    createLocalSigner,
+    type ExternalSigner,
+} from "./signer.js";
 
 // WebSocket transport
 export {
