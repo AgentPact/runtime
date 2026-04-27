@@ -646,6 +646,7 @@ export interface NodeTaskFeedTask {
         walletAddress?: string | null;
     } | null;
     nodeId?: string | null;
+    escrowId?: string | null;
     rewardAmount?: string | null;
     tokenAddress?: string | null;
     category?: string | null;
