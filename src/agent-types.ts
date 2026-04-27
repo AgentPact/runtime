@@ -695,6 +695,7 @@ export interface NodeTaskFeedData {
         displayName: string;
         status?: AgentNodeStatus | string | null;
         automationMode?: AgentNodeAutomationMode | string | null;
+        lastSeenAt?: string | Date | null;
     };
     pending: number;
     tasks: NodeTaskFeedTask[];
