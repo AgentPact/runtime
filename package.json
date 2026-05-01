@@ -1,6 +1,6 @@
 {
   "name": "@agentpactai/runtime",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Deterministic runtime core for AgentPact nodes covering signing, Hub sync, approvals, and on-chain actions",
   "type": "module",
   "main": "./dist/index.cjs",
